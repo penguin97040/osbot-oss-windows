@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to publish releases on v* tags
+
+jobs:
+  windows-msvc:
+    name: Windows (MSVC) - release exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Protocol tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: osbot-oss-windows
+          path: build/Release/osbot-oss-windows.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/Release/osbot-oss-windows.exe \
+            --title "osbot-oss-windows $GITHUB_REF_NAME" --generate-notes
+
+  linux-mingw:
+    name: Linux - tests + MinGW cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 ninja-build
+
+      - name: Protocol tests (native)
+        run: |
+          cmake -S . -B build-linux -G Ninja
+          cmake --build build-linux
+          ctest --test-dir build-linux --output-on-failure
+
+      - name: Cross-compile Windows exe
+        run: |
+          cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
+          cmake --build build-win

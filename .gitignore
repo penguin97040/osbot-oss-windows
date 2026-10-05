@@ -1,0 +1,24 @@
+# --- Proprietary vendor SDK: never commit ---
+/libdev_*/
+/sdk/
+*.dll
+*.lib
+*.pdb
+*.dylib
+*.so
+*.so.*
+
+# --- Build output ---
+/build*/
+/out/
+/dist/
+*.exe
+*.obj
+*.o
+
+# --- Editors / OS ---
+.vs/
+.vscode/
+*.user
+Thumbs.db
+.DS_Store
