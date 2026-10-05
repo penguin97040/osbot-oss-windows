@@ -1,6 +1,12 @@
 # osbot-oss-windows
 
-A small, free and open-source Windows app for controlling an **OBSBOT Tiny 2 Lite**
+> [!IMPORTANT]
+> **Unofficial software.** This is an independent community project. It is not made by,
+> affiliated with, endorsed by or supported by OBSBOT. Please don't contact OBSBOT support
+> about this app; report problems here on GitHub instead. For official software, use
+> OBSBOT Center.
+
+A small, unofficial, free and open-source Windows app for controlling an **OBSBOT Tiny 2 Lite**
 webcam (and probably the Tiny 2), without the official OBSBOT Center software.
 
 - **One file.** A single `.exe` of about 1–2 MB. No installer, no runtimes, no admin rights.
@@ -8,9 +14,6 @@ webcam (and probably the Tiny 2), without the official OBSBOT Center software.
 - **Dark mode**, written in New Zealand English.
 - **No proprietary code.** It talks to the camera with standard USB video (UVC)
   controls plus the camera's vendor commands, as documented by other open-source projects.
-
-> **Unofficial.** Not made by, affiliated with or endorsed by OBSBOT. "OBSBOT" and
-> "Tiny" are trademarks of their owner. This is early software (see [Status](#status)).
 
 Inspired by [obsbot4linux](https://github.com/vampyren/obsbot4linux), which does the same on Linux.
 
@@ -42,7 +45,7 @@ Tips:
 
 ## Status
 
-Tested on a real Tiny 2 Lite: AI tracking, gimbal, HDR, field of view and sleep
+This is early software. Tested on a real Tiny 2 Lite: AI tracking, gimbal, HDR, field of view and sleep
 all work. The Tiny 2 should work too but hasn't been tested. If something doesn't
 work on your camera, see [docs/TESTING.md](docs/TESTING.md) and
 [docs/PROTOCOL.md](docs/PROTOCOL.md).
@@ -68,6 +71,15 @@ cmake --build build-win
 Protocol unit tests run anywhere: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
 
 The OBSBOT SDK is **not** needed and is **not** part of this repository.
+
+## Disclaimer
+
+- "OBSBOT" and "Tiny" are trademarks of their respective owner. They're used here only to
+  say which camera this app works with.
+- This app is provided as is, with no warranty (see the MIT licence). Use it at your own risk.
+- It only changes camera settings. It never updates or modifies the camera's firmware.
+  If the camera ends up in an odd state, unplug it and plug it back in, or reset it in
+  OBSBOT Center.
 
 ## Licence
 
