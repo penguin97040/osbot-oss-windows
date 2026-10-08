@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Bump the version here; it flows into the exe, the About box and version info.
-project(osbot-oss-windows VERSION 0.1.0 LANGUAGES CXX)
+project(osbot-oss-windows VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
