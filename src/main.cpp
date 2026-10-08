@@ -137,6 +137,11 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }  // namespace
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
+    // Load system DLLs only from System32, never from the exe's folder (which
+    // may be Downloads) or the current directory. Must run before any DLL loads;
+    // the MSVC build delay-loads its non-core imports for the same reason.
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+
     // One instance only: two copies would fight over the camera.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\osbot-oss-windows-single-instance");
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {

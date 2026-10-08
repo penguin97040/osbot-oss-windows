@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <shlobj.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
@@ -71,6 +73,14 @@ void Settings::Load() {
     invertPan = getInt("invert_pan", invertPan) != 0;
     invertTilt = getInt("invert_tilt", invertTilt) != 0;
     showDeveloper = getInt("show_developer", showDeveloper) != 0;
+    // A hand-edited or damaged file must not produce out-of-range values (the
+    // move speed goes straight to the gimbal). Fall back to the defaults.
+    const Settings defaults;
+    if (antiFlicker < -1 || antiFlicker > 2) antiFlicker = defaults.antiFlicker;
+    if (variant < 0 || variant > 2) variant = defaults.variant;
+    if (moveMethod < 0 || moveMethod > 1) moveMethod = defaults.moveMethod;
+    if (!std::isfinite(moveSpeed)) moveSpeed = defaults.moveSpeed;
+    moveSpeed = std::clamp(moveSpeed, 5.0f, 90.0f);  // same range as the speed slider
     windowW = getInt("window_w", windowW);
     windowH = getInt("window_h", windowH);
     if (auto it = kv.find("device_path"); it != kv.end()) devicePath = FromUtf8(it->second);
@@ -106,6 +116,10 @@ void Settings::Save() const {
         fprintf(f, "preset%zu_tilt=%ld\r\n", i + 1, presets[i].tilt);
         fprintf(f, "preset%zu_zoom=%ld\r\n", i + 1, presets[i].zoom);
     }
-    fclose(f);
-    MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+    // Only replace the old file if the new one was written completely (e.g. not on a full disk).
+    const bool ok = !ferror(f);
+    if (fclose(f) == 0 && ok)
+        MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+    else
+        DeleteFileW(tmp.c_str());
 }

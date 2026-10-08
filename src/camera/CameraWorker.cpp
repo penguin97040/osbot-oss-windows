@@ -116,6 +116,8 @@ void CameraWorker::Run() {
         for (auto& t : tasks) {
             if (!running_) break;
             t.second();
+            // Keep the hold-to-move dead-man responsive between queued tasks.
+            if (device_.IsOpen()) ServiceGimbal();
         }
         if (!running_) break;
 
@@ -237,6 +239,15 @@ void CameraWorker::ReadStatus() {
     });
 }
 
+// Sleeps on the worker thread without starving the gimbal dead-man stop.
+void CameraWorker::Pause(DWORD ms) {
+    const auto until = steady_clock::now() + milliseconds(ms);
+    while (running_ && steady_clock::now() < until) {
+        Sleep(20);
+        if (device_.IsOpen()) ServiceGimbal();
+    }
+}
+
 // ---- XU helpers -------------------------------------------------------------------
 
 bool CameraWorker::SendSimple(const char* what, const XuBuffer& buf) {
@@ -348,7 +359,7 @@ void CameraWorker::SetFov(obsbot::Fov f) {
         const obsbot::Variant v = EffectiveVariant();
         std::string what = std::string("Field of view \xE2\x86\x92 ") + obsbot::FovName(f);
         if (!SendSimple(what.c_str(), obsbot::FovCommand(f, v))) return;
-        Sleep(300);
+        Pause(300);
         ReadStatus();
         obsbot::Fov readBack;
         const auto st = Snapshot().status;
@@ -372,7 +383,7 @@ void CameraWorker::SetSleep(bool sleep) {
                 SendSimple(what, obsbot::SimpleSleepCommand(sleep));
             }
         }
-        Sleep(500);
+        Pause(500);
         ReadStatus();
     }, "sleep");
 }

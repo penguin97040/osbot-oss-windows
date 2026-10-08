@@ -76,6 +76,7 @@ private:
     void QueryAllUvc();
     void ReadStatus();
     void ServiceGimbal();
+    void Pause(DWORD ms);
     bool SendFramed(const char* what, obsbot::Receiver receiver, uint16_t command, const uint8_t* payload,
                     size_t len, bool waitForReply, obsbot::FrameReply* reply = nullptr);
     bool SendSimple(const char* what, const obsbot::XuBuffer& buf);

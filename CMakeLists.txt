@@ -66,6 +66,8 @@ target_include_directories(osbot-oss-windows PRIVATE
 target_compile_definitions(osbot-oss-windows PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00
   IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+  # No gamepad navigation, so don't probe for XInput DLLs at all.
+  IMGUI_IMPL_WIN32_DISABLE_GAMEPAD
 )
 
 target_link_libraries(osbot-oss-windows PRIVATE
@@ -82,6 +84,15 @@ if(MSVC)
   target_compile_definitions(osbot-oss-windows PRIVATE _CRT_SECURE_NO_WARNINGS)
   # The manifest is embedded via res/app.rc.
   target_link_options(osbot-oss-windows PRIVATE /MANIFEST:NO)
+  # Delay-load the DLLs that aren't KnownDLLs, so they load after WinMain has
+  # restricted the DLL search path to System32 (stops DLL planting next to the exe).
+  target_link_libraries(osbot-oss-windows PRIVATE delayimp)
+  foreach(dll d3d11.dll d3dcompiler_47.dll dwmapi.dll mf.dll mfplat.dll mfreadwrite.dll)
+    target_link_options(osbot-oss-windows PRIVATE /DELAYLOAD:${dll})
+  endforeach()
+  # Control Flow Guard.
+  target_compile_options(osbot-oss-windows PRIVATE /guard:cf)
+  target_link_options(osbot-oss-windows PRIVATE /guard:cf)
 else()
   target_compile_options(osbot-oss-windows PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
   # Fully static: no libstdc++/libgcc/winpthread DLLs next to the exe.

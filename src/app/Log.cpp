@@ -11,6 +11,7 @@ namespace logx {
 
 namespace {
 constexpr size_t kMaxEntries = 2000;
+constexpr long kMaxFileBytes = 10L * 1024 * 1024;  // stop mirroring to disk past this
 std::mutex g_mutex;
 std::deque<Entry> g_entries;
 FILE* g_file = nullptr;
@@ -47,7 +48,14 @@ void Write(Level level, const char* fmt, ...) {
     if (g_entries.size() > kMaxEntries) g_entries.pop_front();
     if (g_file) {
         fprintf(g_file, "%s %s %s\r\n", time, LevelTag(level), text);
-        fflush(g_file);
+        if (ftell(g_file) > kMaxFileBytes) {
+            fprintf(g_file, "%s %s Log file size limit reached; later entries are only shown in the app.\r\n",
+                    time, LevelTag(Level::Warn));
+            fclose(g_file);
+            g_file = nullptr;
+        } else {
+            fflush(g_file);
+        }
     }
 }
 

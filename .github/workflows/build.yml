@@ -8,12 +8,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # needed to publish releases on v* tags
+  contents: read
 
 jobs:
   windows-msvc:
     name: Windows (MSVC) - release exe
     runs-on: windows-latest
+    permissions:
+      contents: write  # needed to publish releases on v* tags
     steps:
       - uses: actions/checkout@v5
 

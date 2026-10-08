@@ -470,8 +470,11 @@ void App::DrawGimbal(const CameraState& s) {
                 auto step = [&](UvcCtl c, int dir) {
                     const UvcInfo& u = U(s, c);
                     if (!dir || !u.supported) return;
-                    const long delta = std::max(u.step, (u.max - u.min) / 40);
-                    worker_.SetUvc(c, std::clamp(u.value + dir * delta, u.min, u.max), false);
+                    // 64-bit maths: driver-reported ranges can be close to the limits of long.
+                    const long long range = static_cast<long long>(u.max) - u.min;
+                    const long long delta = std::max<long long>(u.step, range / 40);
+                    const long long target = static_cast<long long>(u.value) + dir * delta;
+                    worker_.SetUvc(c, static_cast<long>(std::clamp<long long>(target, u.min, u.max)), false);
                 };
                 step(UvcCtl::Pan, sx);
                 step(UvcCtl::Tilt, sy);
@@ -779,8 +782,11 @@ void App::DrawDeveloperTab(const CameraState& s) {
     ImGui::InputTextWithHint("##payload", "Payload hex (empty = GET)", devPayload_, sizeof devPayload_);
     if (ImGui::Button("Send framed")) {
         std::vector<uint8_t> payload;
-        const unsigned long command = strtoul(devCmd_, nullptr, 16);
-        if (!obsbot::ParseHex(devPayload_, &payload) || command > 0xFFFF) {
+        char* end = nullptr;
+        const unsigned long command = strtoul(devCmd_, &end, 16);
+        while (*end == ' ') ++end;
+        const bool commandOk = end != devCmd_ && *end == '\0' && devCmd_[0] != '-' && command <= 0xFFFF;
+        if (!obsbot::ParseHex(devPayload_, &payload) || !commandOk) {
             LOG_WARN("[dev] Check the command and payload hex.");
         } else {
             const obsbot::Receiver r = devReceiver_ == 0   ? obsbot::Receiver::Camera

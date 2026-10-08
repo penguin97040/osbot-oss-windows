@@ -6,6 +6,7 @@
 #include <mfreadwrite.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <cwctype>
 
@@ -121,11 +122,12 @@ void Preview::Run(std::wstring path) {
     ComPtr<IMFMediaSource> source;
     {
         ComPtr<IMFAttributes> attrs;
-        MFCreateAttributes(attrs.GetAddressOf(), 1);
-        attrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+        HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 1);
+        if (SUCCEEDED(hr))
+            hr = attrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
         IMFActivate** devices = nullptr;
         UINT32 count = 0;
-        HRESULT hr = MFEnumDeviceSources(attrs.Get(), &devices, &count);
+        if (SUCCEEDED(hr)) hr = MFEnumDeviceSources(attrs.Get(), &devices, &count);
         if (SUCCEEDED(hr)) {
             for (UINT32 i = 0; i < count; ++i) {
                 WCHAR* link = nullptr;
@@ -153,9 +155,9 @@ void Preview::Run(std::wstring path) {
     ComPtr<IMFSourceReader> reader;
     {
         ComPtr<IMFAttributes> attrs;
-        MFCreateAttributes(attrs.GetAddressOf(), 1);
-        attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
-        HRESULT hr = MFCreateSourceReaderFromMediaSource(source.Get(), attrs.Get(), reader.GetAddressOf());
+        HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 1);
+        if (SUCCEEDED(hr)) hr = attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+        if (SUCCEEDED(hr)) hr = MFCreateSourceReaderFromMediaSource(source.Get(), attrs.Get(), reader.GetAddressOf());
         if (FAILED(hr)) {
             SetError(FriendlyError(hr));
             source->Shutdown();
@@ -189,10 +191,10 @@ void Preview::Run(std::wstring path) {
             best->GetGUID(MF_MT_SUBTYPE, &sub);
         }
         ComPtr<IMFMediaType> rgb;
-        MFCreateMediaType(rgb.GetAddressOf());
-        rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-        HRESULT hr = reader->SetCurrentMediaType(stream, nullptr, rgb.Get());
+        HRESULT hr = MFCreateMediaType(rgb.GetAddressOf());
+        if (SUCCEEDED(hr)) hr = rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        if (SUCCEEDED(hr)) hr = rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        if (SUCCEEDED(hr)) hr = reader->SetCurrentMediaType(stream, nullptr, rgb.Get());
         if (FAILED(hr)) {
             SetError(FriendlyError(hr));
             source->Shutdown();
@@ -207,18 +209,27 @@ void Preview::Run(std::wstring path) {
         format_ = fmt;
     }
 
+    // Frame geometry of the RGB32 output. Re-read whenever the reader reports a
+    // format change, so a new frame size can never overrun the copy below.
     UINT32 width = 0, height = 0;
     LONG defaultStride = 0;
-    {
+    auto readGeometry = [&] {
+        width = height = 0;
+        defaultStride = 0;
         ComPtr<IMFMediaType> current;
-        reader->GetCurrentMediaType(stream, current.GetAddressOf());
-        MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &width, &height);
+        if (FAILED(reader->GetCurrentMediaType(stream, current.GetAddressOf())) || !current) return;
+        if (FAILED(MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &width, &height)) || width > 16384 ||
+            height > 16384) {
+            width = height = 0;
+            return;
+        }
         UINT32 strideAttr = 0;
         if (SUCCEEDED(current->GetUINT32(MF_MT_DEFAULT_STRIDE, &strideAttr)))
             defaultStride = static_cast<LONG>(strideAttr);
         else
             defaultStride = static_cast<LONG>(width * 4);
-    }
+    };
+    readGeometry();
     LOG_INFO("Preview started (%s).", Format().c_str());
 
     std::vector<uint8_t> scratch;
@@ -234,7 +245,9 @@ void Preview::Run(std::wstring path) {
             SetError("The camera stopped sending video.");
             break;
         }
+        if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) readGeometry();
         if (!sample || width == 0 || height == 0) continue;
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
 
         ComPtr<IMFMediaBuffer> buffer;
         if (FAILED(sample->ConvertToContiguousBuffer(buffer.GetAddressOf()))) continue;
@@ -246,18 +259,28 @@ void Preview::Run(std::wstring path) {
         BYTE* raw = nullptr;
         if (SUCCEEDED(buffer.As(&buffer2d)) && SUCCEEDED(buffer2d->Lock2D(&scan0, &pitch))) {
             locked2d = true;
+            if (static_cast<size_t>(std::labs(pitch)) < rowBytes) {  // not the size we expect: skip it
+                buffer2d->Unlock2D();
+                continue;
+            }
         } else {
             DWORD maxLen = 0, curLen = 0;
             if (FAILED(buffer->Lock(&raw, &maxLen, &curLen))) continue;
             pitch = defaultStride;
-            scan0 = pitch < 0 ? raw + static_cast<size_t>(-pitch) * (height - 1) : raw;
+            const size_t absPitch = static_cast<size_t>(std::labs(pitch));
+            // The frame must fit inside the bytes the buffer actually holds.
+            if (absPitch < rowBytes || curLen < absPitch * (height - 1) + rowBytes) {
+                buffer->Unlock();
+                continue;
+            }
+            scan0 = pitch < 0 ? raw + absPitch * (height - 1) : raw;
         }
 
-        scratch.resize(static_cast<size_t>(width) * height * 4);
+        scratch.resize(rowBytes * height);
         for (UINT32 y = 0; y < height; ++y) {
             const uint8_t* src = scan0 + static_cast<ptrdiff_t>(pitch) * y;
-            uint8_t* dst = scratch.data() + static_cast<size_t>(y) * width * 4;
-            std::memcpy(dst, src, static_cast<size_t>(width) * 4);
+            uint8_t* dst = scratch.data() + static_cast<size_t>(y) * rowBytes;
+            std::memcpy(dst, src, rowBytes);
             for (UINT32 x = 0; x < width; ++x) dst[x * 4 + 3] = 0xFF;  // RGB32 alpha is undefined
         }
         if (locked2d)
