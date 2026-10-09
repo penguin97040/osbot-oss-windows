@@ -380,7 +380,7 @@ void Preview::Run(std::wstring path, std::shared_ptr<PreviewReadState> state) {
         SetError("Preview failed: there was not enough memory to capture a frame.");
     }
     state->Cancel();
-    if (reader) reader->Flush(MF_SOURCE_READER_ALL_STREAMS);
+    if (reader) reader->Flush(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS));
     reader.Reset();
     if (source) source->Shutdown();
     source.Reset();
