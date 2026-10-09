@@ -28,5 +28,5 @@ struct Settings {
     void Load();
     void Save() const;
 
-    static std::wstring Directory();  // created on demand
+    static std::wstring Directory();  // created on demand; empty disables persistence
 };

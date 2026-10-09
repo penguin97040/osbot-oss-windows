@@ -8,6 +8,11 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <memory>
+
+#include "../Safety.h"
+
+struct PreviewReadState;
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,13 +33,14 @@ public:
     std::string Format();  // e.g. "1280×720 MJPG 30 fps"
 
 private:
-    void Run(std::wstring path);
+    void Run(std::wstring path, std::shared_ptr<PreviewReadState> state);
     void SetError(const std::string& e);
 
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopRequested_{false};
     std::wstring path_;
+    std::shared_ptr<PreviewReadState> readState_;
 
     std::mutex frameMutex_;
     std::vector<uint8_t> frame_;  // BGRA, tightly packed
@@ -43,7 +49,7 @@ private:
     std::string error_;
     std::string format_;
 
-    uint64_t uploadedId_ = 0;
+    safety::UploadProgress upload_;
     int texW_ = 0, texH_ = 0;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv_;

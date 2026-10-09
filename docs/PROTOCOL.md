@@ -93,6 +93,9 @@ off 16..  payload (max 44 bytes), rest zero
 
 - CRC-16/USB: reflected poly `0xA001`, init `0xFFFF`, xorout `0xFFFF`
   (check value of `"123456789"` is `0xB4C8`).
+- A reply is accepted only after a complete 60-byte GET, a valid header CRC, a
+  payload length no greater than 44 bytes and (for non-empty payloads) a valid
+  payload CRC. Header-only frames remain valid without a payload CRC.
 - After a SET, poll GET on selector 2 until the reply's sequence and command
   match (the mailbox keeps the previous reply). Replies take 50–100 ms.
 - SETs with the wrong payload size are silently ignored. SETs while asleep are

@@ -77,13 +77,11 @@ void CameraWorker::SelectDevice(const std::wstring& path) {
     {
         std::lock_guard<std::mutex> lock(prefMutex_);
         preferredPath_ = path;
+        ++selectionGeneration_;
+        switching_ = true;
     }
-    Post([this, path] {
-        if (device_.IsOpen() && _wcsicmp(device_.Info().path.c_str(), path.c_str()) != 0) {
-            Disconnect("switching camera");
-            TryConnect();
-        }
-    });
+    ClearGimbalHold();
+    Post([] {}, "selection");
 }
 
 obsbot::Variant CameraWorker::EffectiveVariant() const {
@@ -99,6 +97,10 @@ obsbot::Variant CameraWorker::EffectiveVariant() const {
 
 void CameraWorker::Run() {
     HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(hrCom)) {
+        LOG_ERROR("Camera worker COM startup failed: %s", logx::HrText(hrCom).c_str());
+        return;
+    }
     LOG_INFO("Camera worker started.");
     auto lastScan = steady_clock::now() - kScanInterval;
     auto lastStatus = steady_clock::now();
@@ -109,9 +111,25 @@ void CameraWorker::Run() {
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
             // Wake often enough to service hold-to-move smoothly.
-            queueCv_.wait_for(lock, milliseconds(gimbalMoving_ ? 20 : 100),
+            queueCv_.wait_for(lock, milliseconds(gimbal_.moving ? 20 : 100),
                               [this] { return !queue_.empty() || !running_; });
             tasks.swap(queue_);
+        }
+        if (!running_) break;
+        if (switching_) {
+            uint64_t generation;
+            {
+                std::lock_guard<std::mutex> lock(prefMutex_);
+                generation = selectionGeneration_;
+            }
+            if (!device_.IsOpen() || Disconnect("switching camera", true)) {
+                TryConnect();
+                std::lock_guard<std::mutex> lock(prefMutex_);
+                // A newer selection made during connection must still be serviced.
+                if (selectionGeneration_ == generation) switching_ = false;
+            }
+            // Queued commands belong to the previous device.
+            tasks.clear();
         }
         for (auto& t : tasks) {
             if (!running_) break;
@@ -152,11 +170,10 @@ void CameraWorker::Run() {
         }
     }
 
+    ClearGimbalHold();
     if (device_.IsOpen()) {
-        if (gimbalMoving_) {
-            const XuBuffer stop = obsbot::GimbalSpeedFrame(seq_++, 0, 0);
-            device_.XuSet(obsbot::kSelectorFramed, stop);
-        }
+        for (int attempt = 0; attempt < 3 && !StopGimbal(); ++attempt) Sleep(20);
+        if (gimbal_.moving) LOG_WARN("Could not stop the gimbal before closing the camera.");
         device_.Close();
     }
     LOG_INFO("Camera worker stopped.");
@@ -181,6 +198,8 @@ void CameraWorker::TryConnect() {
     if (pick->model == obsbot::Model::Unknown)
         LOG_WARN("This OBSBOT model is untested. Controls may not work.");
     if (!device_.Open(*pick)) return;
+    ClearGimbalHold();
+    gimbal_.moving = false;
 
     UpdateState([&](CameraState& s) {
         s.connected = true;
@@ -208,10 +227,18 @@ void CameraWorker::TryConnect() {
     LOG_INFO("Connected.");
 }
 
-void CameraWorker::Disconnect(const char* reason) {
+bool CameraWorker::Disconnect(const char* reason, bool requireStop) {
+    ClearGimbalHold();
+    if (requireStop) {
+        const bool closed = gimbal_.Close([this] { return SendGimbalStop(); }, [this] { device_.Close(); });
+        if (!closed) return false;
+    } else {
+        StopGimbal();
+        device_.Close();
+    }
+    if (gimbal_.moving) LOG_WARN("Gimbal stop failed; the device is no longer available.");
     LOG_WARN("Disconnected (%s).", reason);
-    device_.Close();
-    gimbalMoving_ = false;
+    gimbal_.moving = false;
     UpdateState([](CameraState& s) {
         s.connected = false;
         s.xu = false;
@@ -219,6 +246,7 @@ void CameraWorker::Disconnect(const char* reason) {
         s.status = {};
         s.rawStatus = {};
     });
+    return true;
 }
 
 void CameraWorker::QueryAllUvc() {
@@ -242,7 +270,7 @@ void CameraWorker::ReadStatus() {
 // Sleeps on the worker thread without starving the gimbal dead-man stop.
 void CameraWorker::Pause(DWORD ms) {
     const auto until = steady_clock::now() + milliseconds(ms);
-    while (running_ && steady_clock::now() < until) {
+    while (running_ && !switching_ && steady_clock::now() < until) {
         Sleep(20);
         if (device_.IsOpen()) ServiceGimbal();
     }
@@ -262,6 +290,14 @@ bool CameraWorker::SendSimple(const char* what, const XuBuffer& buf) {
 
 bool CameraWorker::SendFramed(const char* what, obsbot::Receiver receiver, uint16_t command, const uint8_t* payload,
                               size_t len, bool waitForReply, obsbot::FrameReply* reply) {
+    if (len > obsbot::kXuLength - 16 || (len && !payload)) {
+        LOG_WARN("%s rejected: payload is too large or missing.", what);
+        return false;
+    }
+    if (waitForReply) {
+        ClearGimbalHold();
+        if (!running_ || !StopGimbal()) return false;
+    }
     const uint16_t seq = seq_++;
     if (seq_ == 0) seq_ = 1;
     XuBuffer frame = obsbot::BuildFrame(seq, receiver, command, payload, len);
@@ -272,7 +308,11 @@ bool CameraWorker::SendFramed(const char* what, obsbot::Receiver receiver, uint1
     }
     if (!waitForReply) return true;
     for (int i = 0; i < kReplyPolls; ++i) {
-        Sleep(kReplyPollMs);
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueCv_.wait_for(lock, milliseconds(kReplyPollMs), [this] { return !running_ || switching_; });
+        }
+        if (!running_ || switching_) return false;
         XuBuffer raw{};
         if (FAILED(device_.XuGet(obsbot::kSelectorFramed, &raw))) continue;
         obsbot::FrameReply r = obsbot::ParseFrame(raw);
@@ -289,6 +329,10 @@ bool CameraWorker::SendFramed(const char* what, obsbot::Receiver receiver, uint1
 // ---- Commands -------------------------------------------------------------------------
 
 void CameraWorker::SetUvc(UvcCtl c, long value, bool isAuto) {
+    if (c < UvcCtl::Pan || c >= UvcCtl::Count) return;
+    const auto info = Snapshot().uvc[static_cast<size_t>(c)];
+    if (!info.supported) return;
+    value = std::clamp(value, info.min, info.max);
     // Update the snapshot straight away so sliders don't jump back while queued.
     UpdateState([&](CameraState& s) {
         auto& u = s.uvc[static_cast<size_t>(c)];
@@ -378,7 +422,7 @@ void CameraWorker::SetSleep(bool sleep) {
             ok = SendSimple(what, obsbot::SimpleSleepCommand(sleep));
         } else {
             ok = SendFramed(what, obsbot::Receiver::Camera, obsbot::cmd::kSleepWake, payload, sizeof payload, true);
-            if (!ok) {
+            if (!ok && running_ && !switching_ && !gimbal_.moving) {
                 LOG_INFO("Trying the alternative %s command...", sleep ? "sleep" : "wake");
                 SendSimple(what, obsbot::SimpleSleepCommand(sleep));
             }
@@ -393,6 +437,7 @@ void CameraWorker::Recentre() {
         const uint8_t payload[6] = {};
         if (!SendFramed("Centre gimbal", obsbot::Receiver::Gimbal, obsbot::cmd::kRecentre, payload, sizeof payload,
                         true)) {
+            if (!running_ || switching_ || gimbal_.moving) return;
             LOG_INFO("Trying the alternative centre command...");
             SendSimple("Centre gimbal", obsbot::SimpleRecentreCommand());
         }
@@ -410,11 +455,8 @@ void CameraWorker::GotoPosition(long pan, long tilt, long zoom) {
                      SUCCEEDED(b) ? "ok" : "failed", SUCCEEDED(c) ? "ok" : "failed");
         else
             LOG_INFO("Moved to preset (pan %ld, tilt %ld, zoom %ld).", pan, tilt, zoom);
-        UpdateState([&](CameraState& s) {
-            s.uvc[static_cast<size_t>(UvcCtl::Pan)].value = pan;
-            s.uvc[static_cast<size_t>(UvcCtl::Tilt)].value = tilt;
-            s.uvc[static_cast<size_t>(UvcCtl::Zoom)].value = zoom;
-        });
+        // Read back the camera values, including clamping and partial failures.
+        QueryAllUvc();
     }, "goto");
 }
 
@@ -428,10 +470,17 @@ void CameraWorker::RefreshAll() {
 }
 
 void CameraWorker::HoldGimbalVelocity(float pitchDegPerSec, float yawDegPerSec) {
+    if (switching_) return;
+    if (!std::isfinite(pitchDegPerSec) || !std::isfinite(yawDegPerSec)) {
+        ClearGimbalHold();
+        queueCv_.notify_one();
+        return;
+    }
     {
         std::lock_guard<std::mutex> lock(gimbalMutex_);
-        wantPitch_ = pitchDegPerSec;
-        wantYaw_ = yawDegPerSec;
+        if (switching_) return;
+        wantPitch_ = safety::Velocity(pitchDegPerSec);
+        wantYaw_ = safety::Velocity(yawDegPerSec);
         gimbalRefreshed_ = steady_clock::now();
     }
     queueCv_.notify_one();
@@ -447,31 +496,50 @@ void CameraWorker::ServiceGimbal() {
         refreshed = gimbalRefreshed_;
     }
     const auto now = steady_clock::now();
-    const bool want = (pitch != 0 || yaw != 0) && now - refreshed < kGimbalDeadMan;
+    const bool want = !switching_ && (pitch != 0 || yaw != 0) && now - refreshed < kGimbalDeadMan;
     if (want) {
         if (now - lastGimbalSend_ >= kGimbalResend) {
             lastGimbalSend_ = now;
             const auto payload = obsbot::GimbalSpeedPayload(pitch, yaw);
-            if (!gimbalMoving_) LOG_INFO("Gimbal moving (pitch %.0f\xC2\xB0/s, yaw %.0f\xC2\xB0/s).", pitch, yaw);
-            gimbalMoving_ = SendFramed("Gimbal move", obsbot::Receiver::Ai, obsbot::cmd::kGimbalSpeed,
-                                       payload.data(), payload.size(), false) || gimbalMoving_;
+            if (!gimbal_.moving) LOG_INFO("Gimbal moving (pitch %.0f\xC2\xB0/s, yaw %.0f\xC2\xB0/s).", pitch, yaw);
+            gimbal_.moving = SendFramed("Gimbal move", obsbot::Receiver::Ai, obsbot::cmd::kGimbalSpeed,
+                                       payload.data(), payload.size(), false) || gimbal_.moving;
         }
-    } else if (gimbalMoving_) {
-        const uint8_t zeros[12] = {};
-        // Send stop twice: a lost stop would leave the gimbal turning.
-        SendFramed("Gimbal stop", obsbot::Receiver::Ai, obsbot::cmd::kGimbalSpeed, zeros, sizeof zeros, false);
-        SendFramed("Gimbal stop", obsbot::Receiver::Ai, obsbot::cmd::kGimbalSpeed, zeros, sizeof zeros, false);
-        gimbalMoving_ = false;
-        LOG_INFO("Gimbal stopped.");
+    } else if (gimbal_.moving) {
+        StopGimbal();
     }
+}
+
+void CameraWorker::ClearGimbalHold() {
+    std::lock_guard<std::mutex> lock(gimbalMutex_);
+    wantPitch_ = wantYaw_ = 0;
+    gimbalRefreshed_ = {};
+}
+
+bool CameraWorker::StopGimbal() {
+    const bool wasMoving = gimbal_.moving;
+    const bool stopped = gimbal_.Stop([this] { return SendGimbalStop(); });
+    if (wasMoving && stopped) LOG_INFO("Gimbal stopped.");
+    return stopped;
+}
+
+bool CameraWorker::SendGimbalStop() {
+    const uint8_t zeros[12] = {};
+    return SendFramed("Gimbal stop", obsbot::Receiver::Ai, obsbot::cmd::kGimbalSpeed,
+                      zeros, sizeof zeros, false);
 }
 
 // ---- Developer tab ---------------------------------------------------------------------
 
 void CameraWorker::DevSetRaw(uint32_t selector, std::vector<uint8_t> bytes) {
+    if (bytes.size() > obsbot::kXuLength) {
+        LOG_WARN("Developer SET rejected: at most 60 bytes are allowed.");
+        UpdateState([](CameraState& s) { s.devOutput = "SET rejected: at most 60 bytes are allowed."; });
+        return;
+    }
     Post([this, selector, bytes] {
         XuBuffer buf{};
-        std::copy_n(bytes.begin(), std::min(bytes.size(), buf.size()), buf.begin());
+        std::copy(bytes.begin(), bytes.end(), buf.begin());
         HRESULT hr = device_.XuSet(selector, buf);
         std::string out = "SET selector " + std::to_string(selector) + ": " +
                           (SUCCEEDED(hr) ? std::string("OK") : logx::HrText(hr)) + "\n" +
@@ -494,6 +562,11 @@ void CameraWorker::DevGetRaw(uint32_t selector) {
 }
 
 void CameraWorker::DevFramed(obsbot::Receiver receiver, uint16_t command, std::vector<uint8_t> payload) {
+    if (payload.size() > obsbot::kXuLength - 16) {
+        LOG_WARN("Developer frame rejected: at most 44 payload bytes are allowed.");
+        UpdateState([](CameraState& s) { s.devOutput = "Frame rejected: at most 44 payload bytes are allowed."; });
+        return;
+    }
     Post([this, receiver, command, payload] {
         obsbot::FrameReply reply;
         char what[64];

@@ -31,13 +31,18 @@ bool g_occluded = false;
 UINT g_resizeW = 0, g_resizeH = 0;
 float g_pendingDpiScale = 0.0f;
 
-void CreateRenderTarget() {
+bool CreateRenderTarget() {
     ID3D11Texture2D* backBuffer = nullptr;
-    g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    HRESULT hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
     if (backBuffer) {
-        g_device->CreateRenderTargetView(backBuffer, nullptr, &g_rtv);
+        hr = g_device->CreateRenderTargetView(backBuffer, nullptr, &g_rtv);
         backBuffer->Release();
     }
+    if (FAILED(hr) || !g_rtv) {
+        LOG_ERROR("Render target creation failed: %s", logx::HrText(hr).c_str());
+        return false;
+    }
+    return true;
 }
 
 void CleanupRenderTarget() {
@@ -64,9 +69,11 @@ bool CreateDeviceD3D(HWND hwnd) {
     if (hr == DXGI_ERROR_UNSUPPORTED)  // no GPU: fall back to the WARP software rasteriser
         hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
                                            &sd, &g_swapChain, &g_device, &got, &g_context);
-    if (FAILED(hr)) return false;
-    CreateRenderTarget();
-    return true;
+    if (FAILED(hr)) {
+        LOG_ERROR("Direct3D startup failed: %s", logx::HrText(hr).c_str());
+        return false;
+    }
+    return CreateRenderTarget();
 }
 
 void CleanupDeviceD3D() {
@@ -75,6 +82,32 @@ void CleanupDeviceD3D() {
     if (g_context) { g_context->Release(); g_context = nullptr; }
     if (g_device) { g_device->Release(); g_device = nullptr; }
 }
+
+struct RuntimeCleanup {
+    HANDLE mutex = nullptr;
+    bool com = false, mf = false;
+    ~RuntimeCleanup() {
+        if (mf) MFShutdown();
+        if (com) CoUninitialize();
+        if (mutex) CloseHandle(mutex);
+    }
+};
+
+struct WindowCleanup {
+    HINSTANCE instance;
+    HWND hwnd = nullptr;
+    HBRUSH brush = nullptr;
+    bool registered = false, context = false, win32 = false, dx11 = false;
+    ~WindowCleanup() {
+        if (dx11) ImGui_ImplDX11_Shutdown();
+        if (win32) ImGui_ImplWin32_Shutdown();
+        if (context) ImGui::DestroyContext();
+        CleanupDeviceD3D();
+        if (hwnd) DestroyWindow(hwnd);
+        if (registered) UnregisterClassW(kWindowClass, instance);
+        if (brush) DeleteObject(brush);
+    }
+};
 
 // Dark title bar on Windows 10 (build 18985+) and Windows 11.
 void UseDarkTitleBar(HWND hwnd) {
@@ -142,8 +175,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     // the MSVC build delay-loads its non-core imports for the same reason.
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
 
+    RuntimeCleanup runtime;
     // One instance only: two copies would fight over the camera.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\osbot-oss-windows-single-instance");
+    runtime.mutex = mutex;
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND existing = FindWindowW(kWindowClass, nullptr)) {
             ShowWindow(existing, SW_RESTORE);
@@ -152,14 +187,27 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
         return 0;
     }
 
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    MFStartup(MF_VERSION, MFSTARTUP_LITE);
-    logx::OpenFile(Settings::Directory() + L"\\osbot-oss.log");
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+        LOG_ERROR("COM startup failed: %s", logx::HrText(hr).c_str());
+        return 1;
+    }
+    runtime.com = true;
+    const auto directory = Settings::Directory();
+    if (!directory.empty()) logx::OpenFile(directory + L"\\osbot-oss.log");
+    else LOG_WARN("AppData is unavailable; settings and log persistence are disabled.");
+    hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+    if (FAILED(hr)) {
+        LOG_ERROR("Media Foundation startup failed: %s", logx::HrText(hr).c_str());
+        return 1;
+    }
+    runtime.mf = true;
     LOG_INFO("osbot-oss-windows %s starting.", OSBOT_VERSION_STRING);
 
     ImGui_ImplWin32_EnableDpiAwareness();
     const float scale = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
+    WindowCleanup window{instance};
     App app;
     app.GetSettings().Load();
     Settings& settings = app.GetSettings();
@@ -174,13 +222,23 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = CreateSolidBrush(RGB(0x0F, 0x11, 0x15));
     wc.lpszClassName = kWindowClass;
-    RegisterClassExW(&wc);
+    window.brush = wc.hbrBackground;
+    if (!RegisterClassExW(&wc)) {
+        LOG_ERROR("Window class registration failed: %s", logx::HrText(HRESULT_FROM_WIN32(GetLastError())).c_str());
+        return 1;
+    }
+    window.registered = true;
 
     const int w = std::clamp(settings.windowW, 820, 7680);
     const int h = std::clamp(settings.windowH, 600, 4320);
     HWND hwnd = CreateWindowW(kWindowClass, L"osbot-oss — OBSBOT camera control", WS_OVERLAPPEDWINDOW,
                               CW_USEDEFAULT, CW_USEDEFAULT, static_cast<int>(w * scale), static_cast<int>(h * scale),
                               nullptr, nullptr, instance, nullptr);
+    window.hwnd = hwnd;
+    if (!hwnd) {
+        LOG_ERROR("Window creation failed: %s", logx::HrText(HRESULT_FROM_WIN32(GetLastError())).c_str());
+        return 1;
+    }
     UseDarkTitleBar(hwnd);
 
     if (!CreateDeviceD3D(hwnd)) {
@@ -194,18 +252,24 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    window.context = true;
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;  // we keep our own settings file
     App::ApplyTheme(scale);
-    ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX11_Init(g_device, g_context);
+    window.win32 = ImGui_ImplWin32_Init(hwnd);
+    if (window.win32) window.dx11 = ImGui_ImplDX11_Init(g_device, g_context);
+    if (!window.win32 || !window.dx11 || !ImGui_ImplDX11_CreateDeviceObjects()) {
+        LOG_ERROR("Could not initialise the graphics interface.");
+        return 1;
+    }
     LoadFonts();
 
     app.Init(hwnd, g_device, g_context);
 
     const float clear[4] = {0.059f, 0.067f, 0.082f, 1.0f};
     bool done = false;
+    bool graphicsFailed = false;
     int busyFrames = 0;
     while (!done) {
         // Idle politely: wait for input (or 250 ms for status updates) unless
@@ -231,17 +295,26 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
         else if (busyFrames > 0)
             --busyFrames;
 
-        if (g_occluded && g_swapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
-            Sleep(50);
-            continue;
+        if (g_occluded) {
+            hr = g_swapChain->Present(0, DXGI_PRESENT_TEST);
+            if (FAILED(hr)) {
+                LOG_ERROR("Graphics device failed: %s", logx::HrText(hr).c_str());
+                graphicsFailed = true;
+                break;
+            }
+            if (hr == DXGI_STATUS_OCCLUDED) { Sleep(50); continue; }
         }
         g_occluded = false;
 
         if (g_resizeW && g_resizeH) {
             CleanupRenderTarget();
-            g_swapChain->ResizeBuffers(0, g_resizeW, g_resizeH, DXGI_FORMAT_UNKNOWN, 0);
+            hr = g_swapChain->ResizeBuffers(0, g_resizeW, g_resizeH, DXGI_FORMAT_UNKNOWN, 0);
             g_resizeW = g_resizeH = 0;
-            CreateRenderTarget();
+            if (FAILED(hr) || !CreateRenderTarget()) {
+                LOG_ERROR("Graphics resize failed: %s", logx::HrText(hr).c_str());
+                graphicsFailed = true;
+                break;
+            }
         }
         if (g_pendingDpiScale > 0) {
             App::ApplyTheme(g_pendingDpiScale);
@@ -256,7 +329,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
         g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
         g_context->ClearRenderTargetView(g_rtv, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-        g_occluded = g_swapChain->Present(1, 0) == DXGI_STATUS_OCCLUDED;
+        hr = g_swapChain->Present(1, 0);
+        if (FAILED(hr)) {
+            LOG_ERROR("Graphics presentation failed: %s", logx::HrText(hr).c_str());
+            graphicsFailed = true;
+            break;
+        }
+        g_occluded = hr == DXGI_STATUS_OCCLUDED;
     }
 
     // Remember the window size in 96-DPI units.
@@ -268,14 +347,5 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     }
     app.Shutdown();
 
-    ImGui_ImplDX11_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-    CleanupDeviceD3D();
-    DestroyWindow(hwnd);
-    UnregisterClassW(kWindowClass, instance);
-    MFShutdown();
-    CoUninitialize();
-    if (mutex) CloseHandle(mutex);
-    return 0;
+    return graphicsFailed ? 1 : 0;
 }

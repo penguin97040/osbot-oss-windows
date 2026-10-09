@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Bump the version here; it flows into the exe, the About box and version info.
-project(osbot-oss-windows VERSION 0.1.1 LANGUAGES CXX)
+project(osbot-oss-windows VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,18 +15,25 @@ enable_testing()
 # ---- Protocol tests: platform independent, build anywhere (incl. Linux) ----
 add_executable(protocol_tests tests/protocol_tests.cpp src/camera/ObsbotProtocol.cpp)
 add_test(NAME protocol_tests COMMAND protocol_tests)
-if(MSVC)
-  target_compile_options(protocol_tests PRIVATE /W4 /utf-8)
-  set_property(TARGET protocol_tests PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-else()
-  target_compile_options(protocol_tests PRIVATE -Wall -Wextra)
-  if(MINGW)
-    target_link_options(protocol_tests PRIVATE -static)
+add_executable(safety_tests tests/safety_tests.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(safety_tests PRIVATE Threads::Threads)
+add_test(NAME safety_tests COMMAND safety_tests)
+set_tests_properties(safety_tests PROPERTIES TIMEOUT 15)
+foreach(test_target protocol_tests safety_tests)
+  if(MSVC)
+    target_compile_options(${test_target} PRIVATE /W4 /WX /utf-8)
+    set_property(TARGET ${test_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  else()
+    target_compile_options(${test_target} PRIVATE -Wall -Wextra -Werror)
+    if(MINGW)
+      target_link_options(${test_target} PRIVATE -static)
+    endif()
   endif()
-endif()
+endforeach()
 
 if(NOT WIN32)
-  message(STATUS "Not targeting Windows: only building protocol_tests. "
+  message(STATUS "Not targeting Windows: only building regression tests. "
                  "Use -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake to cross-compile the app.")
   return()
 endif()
@@ -80,7 +87,7 @@ target_link_libraries(osbot-oss-windows PRIVATE
 if(MSVC)
   # Static CRT so the exe runs without the Visual C++ Redistributable.
   set_property(TARGET osbot-oss-windows PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-  target_compile_options(osbot-oss-windows PRIVATE /W4 /utf-8 /permissive- /wd4100)
+  target_compile_options(osbot-oss-windows PRIVATE /W4 /WX /utf-8 /permissive- /wd4100)
   target_compile_definitions(osbot-oss-windows PRIVATE _CRT_SECURE_NO_WARNINGS)
   # The manifest is embedded via res/app.rc.
   target_link_options(osbot-oss-windows PRIVATE /MANIFEST:NO)
@@ -94,7 +101,7 @@ if(MSVC)
   target_compile_options(osbot-oss-windows PRIVATE /guard:cf)
   target_link_options(osbot-oss-windows PRIVATE /guard:cf)
 else()
-  target_compile_options(osbot-oss-windows PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+  target_compile_options(osbot-oss-windows PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers)
   # Fully static: no libstdc++/libgcc/winpthread DLLs next to the exe.
   target_link_options(osbot-oss-windows PRIVATE -static -static-libgcc -static-libstdc++ -s)
 endif()

@@ -46,7 +46,8 @@ Tips:
 ## Status
 
 This is early software. Tested on a real Tiny 2 Lite: AI tracking, gimbal, HDR, field of view and sleep
-all work. The Tiny 2 should work too but hasn't been tested. If something doesn't
+all work in v0.1.0. Hardware verification of the v0.1.2 safety fixes is pending.
+The Tiny 2 should work too but hasn't been tested. If something doesn't
 work on your camera, see [docs/TESTING.md](docs/TESTING.md) and
 [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -68,7 +69,11 @@ cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.c
 cmake --build build-win
 ```
 
-Protocol unit tests run anywhere: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
+Protocol and safety regression tests run anywhere: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
+
+The official release uses MSVC with restricted system DLL loading. MinGW development builds
+still resolve static DLL imports before startup, so they retain the risk of a malicious DLL
+placed beside the executable.
 
 The OBSBOT SDK is **not** needed and is **not** part of this repository.
 

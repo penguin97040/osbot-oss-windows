@@ -137,7 +137,7 @@ XuBuffer SimpleRecentreCommand() {
 XuBuffer BuildFrame(uint16_t seq, Receiver receiver, uint16_t command,
                     const uint8_t* payload, size_t payloadLen) {
     XuBuffer f{};
-    if (payloadLen > kXuLength - 16) payloadLen = kXuLength - 16;
+    if (payloadLen > kXuLength - 16 || (payloadLen && !payload)) return f;
     f[0] = 0xAA;
     f[1] = payloadLen ? kFlagSet : kFlagGet;
     PutU16(&f[2], seq);
@@ -196,12 +196,17 @@ FrameReply ParseFrame(const XuBuffer& buf) {
     XuBuffer copy = buf;
     copy[6] = copy[7] = 0;
     if (Crc16Usb(copy.data(), 12) != GetU16(&buf[6])) return r;
+    const uint16_t len = GetU16(&buf[12]);
+    if (len > kXuLength - 16) return r;
+    if (len) {
+        copy[14] = copy[15] = 0;
+        if (Crc16Usb(&copy[12], 4 + len) != GetU16(&buf[14])) return r;
+    }
     r.valid = true;
     r.flags = buf[1];
     r.seq = GetU16(&buf[2]);
     r.command = GetU16(&buf[10]);
-    const uint16_t len = GetU16(&buf[12]);
-    if (len > 0 && len <= kXuLength - 16)
+    if (len > 0)
         r.payload.assign(buf.begin() + 16, buf.begin() + 16 + len);
     return r;
 }

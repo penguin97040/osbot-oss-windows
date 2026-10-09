@@ -74,6 +74,30 @@ int main() {
         CHECK(!ParseFrame(corrupt).valid);
     }
 
+    // Payload integrity and length, independent of a valid header CRC.
+    {
+        XuBuffer frame = SleepWakeFrame(0xA5, false);
+        CHECK(ParseFrame(frame).valid);
+        frame[16] ^= 1;
+        CHECK(!ParseFrame(frame).valid);
+        frame = SleepWakeFrame(0xA5, false);
+        frame[14] ^= 1;
+        CHECK(!ParseFrame(frame).valid);
+        frame = SleepWakeFrame(0xA5, false);
+        frame[12] = 45;
+        CHECK(!ParseFrame(frame).valid);
+        frame[12] = frame[13] = 0xFF;
+        CHECK(!ParseFrame(frame).valid);
+        std::vector<uint8_t> payload(44, 0xA5);
+        CHECK(ParseFrame(BuildFrame(1, Receiver::Camera, 1, payload.data(), payload.size())).valid);
+        payload.push_back(0);
+        CHECK(!ParseFrame(BuildFrame(1, Receiver::Camera, 1, payload.data(), payload.size())).valid);
+        CHECK(!ParseFrame(BuildFrame(1, Receiver::Camera, 1, nullptr, 1)).valid);
+        // All captured command bytes continue to pass the stricter parser.
+        for (auto f : {SleepWakeFrame(0xAB, true), RecentreFrame(1), TrackingSpeedFrame(2, true)})
+            CHECK(ParseFrame(f).valid);
+    }
+
     // Simple tag commands.
     CheckPrefix(AiModeCommand(AiMode::Off), "16 02 00 00", "AI off");
     CheckPrefix(AiModeCommand(AiMode::UpperBody), "16 02 02 01", "AI upper body");

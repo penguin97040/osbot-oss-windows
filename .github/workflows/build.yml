@@ -25,7 +25,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Protocol tests
+      - name: Regression tests
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Upload exe
@@ -53,11 +53,17 @@ jobs:
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y mingw-w64 ninja-build
 
-      - name: Protocol tests (native)
+      - name: Regression tests (native)
         run: |
           cmake -S . -B build-linux -G Ninja
           cmake --build build-linux
           ctest --test-dir build-linux --output-on-failure
+
+      - name: Sanitised regression tests
+        run: |
+          cmake -S . -B build-sanitised -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build-sanitised
+          ctest --test-dir build-sanitised --output-on-failure
 
       - name: Cross-compile Windows exe
         run: |

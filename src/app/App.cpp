@@ -1,4 +1,5 @@
 #include "App.h"
+#include "../Safety.h"
 
 #include <shellapi.h>
 
@@ -446,6 +447,7 @@ void App::DrawGimbal(const CameraState& s) {
     ImGui::SetItemTooltip("If one method doesn't move your camera, try the other.");
     if (settings_.moveMethod == static_cast<int>(MoveMethod::GimbalSpeed))
         ImGui::SliderFloat("##speed", &settings_.moveSpeed, 5.0f, 90.0f, "Speed %.0f\xC2\xB0/s");
+    settings_.moveSpeed = safety::MoveSpeed(settings_.moveSpeed);
     ImGui::Checkbox("Invert left/right", &settings_.invertPan);
     ImGui::PopItemWidth();
     ImGui::EndGroup();
@@ -470,11 +472,7 @@ void App::DrawGimbal(const CameraState& s) {
                 auto step = [&](UvcCtl c, int dir) {
                     const UvcInfo& u = U(s, c);
                     if (!dir || !u.supported) return;
-                    // 64-bit maths: driver-reported ranges can be close to the limits of long.
-                    const long long range = static_cast<long long>(u.max) - u.min;
-                    const long long delta = std::max<long long>(u.step, range / 40);
-                    const long long target = static_cast<long long>(u.value) + dir * delta;
-                    worker_.SetUvc(c, static_cast<long>(std::clamp<long long>(target, u.min, u.max)), false);
+                    worker_.SetUvc(c, safety::StepValue(u.value, u.min, u.max, u.step, dir), false);
                 };
                 step(UvcCtl::Pan, sx);
                 step(UvcCtl::Tilt, sy);
@@ -489,11 +487,11 @@ void App::DrawGimbal(const CameraState& s) {
             ImGui::TextDisabled("%s: not available", label);
             return;
         }
-        const float perDeg = (u.max - u.min) > 3600 ? 3600.0f : 1.0f;
+        const float perDeg = (static_cast<int64_t>(u.max) - u.min) > 3600 ? 3600.0f : 1.0f;
         float deg = u.value / perDeg;
         ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Pan  ").x - ImGui::GetStyle().ItemInnerSpacing.x);
         if (ImGui::SliderFloat(label, &deg, u.min / perDeg, u.max / perDeg, "%.0f\xC2\xB0"))
-            worker_.SetUvc(c, std::clamp(static_cast<long>(std::lround(deg * perDeg)), u.min, u.max), false);
+            worker_.SetUvc(c, safety::AngleValue(deg, perDeg, u.min, u.max), false);
     };
     angleSlider(UvcCtl::Pan, "Pan");
     angleSlider(UvcCtl::Tilt, "Tilt");
@@ -552,10 +550,11 @@ void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label) {
     ImGui::TextUnformatted(label);
     ImGui::SameLine(labelW);
     ImGui::BeginDisabled(u.isAuto);
-    int v = static_cast<int>(u.value);
+    int64_t v = u.value;
+    const int64_t min = u.min, max = u.max;
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - autoW);
-    if (ImGui::SliderInt("##v", &v, static_cast<int>(u.min), static_cast<int>(u.max)))
-        worker_.SetUvc(c, v, false);
+    if (ImGui::SliderScalar("##v", ImGuiDataType_S64, &v, &min, &max, "%lld", ImGuiSliderFlags_AlwaysClamp))
+        worker_.SetUvc(c, static_cast<long>(v), false);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) worker_.SetUvc(c, u.def, false);
     ImGui::SetItemTooltip("Double-click to reset (default %ld).", u.def);
     ImGui::EndDisabled();

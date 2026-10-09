@@ -1,8 +1,8 @@
 # Hardware test checklist (Windows)
 
-Automated tests only cover the protocol encoding, so every camera feature needs
+Automated tests cover protocol encoding and safety helpers, but every camera feature needs
 a real test on Windows with the OBSBOT plugged in. Run through this list after
-each release.
+each release. **v0.1.2 real Windows camera verification is pending.**
 
 ## Before you start
 
@@ -23,7 +23,12 @@ developer tools*.
 - [ ] The header shows "OBSBOT Tiny 2 Lite" with a green dot.
 - [ ] The live preview appears. Note the format shown at the top left.
 - [ ] Unplug the camera: the header goes red within a few seconds. Plug it back in: it reconnects.
-- [ ] Untick *Camera → Show live preview*: the preview stops and controls still work.
+- [ ] Untick *Camera → Show live preview*: the preview stops promptly and controls still work.
+- [ ] Toggle the preview off/on several times; each restart shows new frames.
+- [ ] Unplug while previewing, then turn the preview off and close the app: neither action freezes.
+- [ ] Sleep the camera while previewing, then turn the preview off/on and wake it; the app stays responsive.
+- [ ] With two cameras connected, switch cameras during preview; only the selected camera appears.
+- [ ] Resize, minimise and restore the window while previewing; the image redraws normally.
 
 ### AI tracking (Control tab)
 - [ ] *Normal* starts tracking you. The button stays highlighted.
@@ -39,6 +44,11 @@ developer tools*.
 - [ ] *Steps (UVC)*: hold each arrow; does the camera move?
 - [ ] *Pan*, *Tilt* and *Zoom* sliders move the camera.
 - [ ] *Centre* returns the camera to the middle. What does the Log say?
+- [ ] Release a held arrow while changing tracking speed, FOV or sleep; movement stops promptly.
+- [ ] Switch cameras while holding an arrow; the old camera stops and the new camera does not inherit movement.
+- [ ] Close the app while moving; the camera stops. Unplug during movement, reconnect and confirm it remains stopped.
+- [ ] Ctrl-click the speed slider and type `1000`, then `-10`; the displayed speed stays within 5–90°/s.
+- [ ] Recall a saved preset after changing cameras; positions stay within the selected camera's ranges.
 
 ### Presets
 - [ ] Save preset 1, move away, press *Go*: it returns.

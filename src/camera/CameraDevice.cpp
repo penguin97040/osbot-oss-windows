@@ -1,4 +1,5 @@
 #include "CameraDevice.h"
+#include <algorithm>
 
 #include <dshow.h>
 #include <ks.h>
@@ -195,7 +196,10 @@ HRESULT CameraDevice::XuTransfer(uint32_t selector, unsigned long flags, unsigne
     prop.Property.Flags = flags;
     prop.NodeId = node;
     ULONG returned = 0;
-    return ksControl_->KsProperty(reinterpret_cast<PKSPROPERTY>(&prop), sizeof prop, data, len, &returned);
+    const HRESULT hr = ksControl_->KsProperty(reinterpret_cast<PKSPROPERTY>(&prop), sizeof prop, data, len, &returned);
+    if (SUCCEEDED(hr) && (flags & KSPROPERTY_TYPE_GET) && returned != len)
+        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    return hr;
 }
 
 HRESULT CameraDevice::XuSet(uint32_t selector, const obsbot::XuBuffer& data) {
@@ -249,6 +253,11 @@ bool CameraDevice::GetUvc(UvcCtl c, long* value, bool* isAuto) {
 }
 
 HRESULT CameraDevice::SetUvc(UvcCtl c, long value, bool isAuto) {
+    if (c < UvcCtl::Pan || c >= UvcCtl::Count) return E_INVALIDARG;
+    UvcInfo range;
+    if (!QueryUvc(c, &range)) return E_NOINTERFACE;
+    if ((isAuto && !range.canAuto) || (!isAuto && !range.canManual)) return E_INVALIDARG;
+    value = std::clamp(value, range.min, range.max);
     UvcMapping m = MapUvc(c);
     long flags = isAuto ? 0x1 : 0x2;
     if (m.isCameraControl && cameraControl_) return cameraControl_->Set(m.property, value, flags);

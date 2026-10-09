@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include "../Safety.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -12,7 +13,10 @@
 
 namespace {
 
-std::wstring FilePath() { return Settings::Directory() + L"\\settings.ini"; }
+std::wstring FilePath() {
+    const auto dir = Settings::Directory();
+    return dir.empty() ? std::wstring{} : dir + L"\\settings.ini";
+}
 
 std::string ToUtf8(const std::wstring& w) {
     if (w.empty()) return {};
@@ -33,21 +37,28 @@ std::wstring FromUtf8(const std::string& s) {
 }  // namespace
 
 std::wstring Settings::Directory() {
-    PWSTR appData = nullptr;
-    std::wstring dir;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) {
-        dir = appData;
+    static const std::wstring directory = []() -> std::wstring {
+        PWSTR appData = nullptr;
+        const HRESULT hr = SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData);
+        std::wstring dir;
+        if (SUCCEEDED(hr) && appData) dir = appData;
         CoTaskMemFree(appData);
-    } else {
-        dir = L".";
-    }
-    dir += L"\\osbot-oss-windows";
-    CreateDirectoryW(dir.c_str(), nullptr);
-    return dir;
+        if (dir.empty()) return {};
+        dir += L"\\osbot-oss-windows";
+        if (!CreateDirectoryW(dir.c_str(), nullptr)) {
+            if (GetLastError() != ERROR_ALREADY_EXISTS) return {};
+            const DWORD attrs = GetFileAttributesW(dir.c_str());
+            if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) return {};
+        }
+        return dir;
+    }();
+    return directory;
 }
 
 void Settings::Load() {
-    FILE* f = _wfopen(FilePath().c_str(), L"rb");
+    const auto path = FilePath();
+    if (path.empty()) return;
+    FILE* f = _wfopen(path.c_str(), L"rb");
     if (!f) return;
     std::map<std::string, std::string> kv;
     char line[1024];
@@ -61,18 +72,22 @@ void Settings::Load() {
     }
     fclose(f);
 
-    auto getInt = [&](const char* k, int def) { auto it = kv.find(k); return it == kv.end() ? def : atoi(it->second.c_str()); };
-    auto getLong = [&](const std::string& k, long def) { auto it = kv.find(k); return it == kv.end() ? def : atol(it->second.c_str()); };
-    auto getFloat = [&](const char* k, float def) { auto it = kv.find(k); return it == kv.end() ? def : static_cast<float>(atof(it->second.c_str())); };
+    auto getInt = [&](const char* k, int def) { auto it = kv.find(k); return it == kv.end() ? def : safety::ParseNumber(it->second, def); };
+    auto getLong = [&](const std::string& k, long def) { auto it = kv.find(k); return it == kv.end() ? def : safety::ParseNumber(it->second, def); };
+    auto getFloat = [&](const char* k, float def) { auto it = kv.find(k); return it == kv.end() ? def : safety::ParseNumber(it->second, def); };
 
-    previewEnabled = getInt("preview", previewEnabled) != 0;
+    auto getBool = [&](const char* k, bool def) {
+        const int value = getInt(k, def ? 1 : 0);
+        return value == 0 ? false : value == 1 ? true : def;
+    };
+    previewEnabled = getBool("preview", previewEnabled);
     antiFlicker = getInt("anti_flicker", antiFlicker);
     variant = getInt("protocol_variant", variant);
     moveMethod = getInt("move_method", moveMethod);
     moveSpeed = getFloat("move_speed", moveSpeed);
-    invertPan = getInt("invert_pan", invertPan) != 0;
-    invertTilt = getInt("invert_tilt", invertTilt) != 0;
-    showDeveloper = getInt("show_developer", showDeveloper) != 0;
+    invertPan = getBool("invert_pan", invertPan);
+    invertTilt = getBool("invert_tilt", invertTilt);
+    showDeveloper = getBool("show_developer", showDeveloper);
     // A hand-edited or damaged file must not produce out-of-range values (the
     // move speed goes straight to the gimbal). Fall back to the defaults.
     const Settings defaults;
@@ -86,7 +101,7 @@ void Settings::Load() {
     if (auto it = kv.find("device_path"); it != kv.end()) devicePath = FromUtf8(it->second);
     for (size_t i = 0; i < presets.size(); ++i) {
         const std::string p = "preset" + std::to_string(i + 1) + "_";
-        presets[i].saved = getLong(p + "saved", 0) != 0;
+        presets[i].saved = getLong(p + "saved", 0) == 1;
         presets[i].pan = getLong(p + "pan", 0);
         presets[i].tilt = getLong(p + "tilt", 0);
         presets[i].zoom = getLong(p + "zoom", 0);
@@ -95,6 +110,7 @@ void Settings::Load() {
 
 void Settings::Save() const {
     const std::wstring path = FilePath();
+    if (path.empty()) return;
     const std::wstring tmp = path + L".tmp";
     FILE* f = _wfopen(tmp.c_str(), L"wb");
     if (!f) return;

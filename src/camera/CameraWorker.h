@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "CameraDevice.h"
+#include "../Safety.h"
 #include "ObsbotProtocol.h"
 
 // Which protocol codes to use where the sources disagree (see docs/PROTOCOL.md).
@@ -72,7 +73,10 @@ private:
     void Post(Task task, const std::string& coalesceKey = {});
     void Run();
     void TryConnect();
-    void Disconnect(const char* reason);
+    bool Disconnect(const char* reason, bool requireStop = false);
+    void ClearGimbalHold();
+    bool StopGimbal();
+    bool SendGimbalStop();
     void QueryAllUvc();
     void ReadStatus();
     void ServiceGimbal();
@@ -98,12 +102,14 @@ private:
     std::atomic<long> antiFlicker_{-1};
     std::mutex prefMutex_;
     std::wstring preferredPath_;
+    uint64_t selectionGeneration_ = 0;
 
     // Gimbal hold-to-move (written by UI thread, read by worker).
     std::mutex gimbalMutex_;
     float wantPitch_ = 0, wantYaw_ = 0;
     std::chrono::steady_clock::time_point gimbalRefreshed_{};
-    bool gimbalMoving_ = false;
+    safety::GimbalMotion gimbal_;
+    std::atomic<bool> switching_{false};
     std::chrono::steady_clock::time_point lastGimbalSend_{};
 
     uint16_t seq_ = 1;

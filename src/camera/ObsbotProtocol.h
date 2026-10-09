@@ -72,6 +72,7 @@ constexpr uint8_t kFlagGet = 0x01;
 constexpr uint8_t kHostId = 0x0A;
 
 // Builds a framed command. An empty payload makes a header-only GET frame.
+// Invalid or oversized payloads return an all-zero buffer.
 XuBuffer BuildFrame(uint16_t seq, Receiver receiver, uint16_t command,
                     const uint8_t* payload, size_t payloadLen);
 XuBuffer SleepWakeFrame(uint16_t seq, bool sleep);
@@ -81,7 +82,7 @@ XuBuffer GimbalSpeedFrame(uint16_t seq, float pitchDegPerSec, float yawDegPerSec
 XuBuffer TrackingSpeedFrame(uint16_t seq, bool sport);
 
 struct FrameReply {
-    bool valid = false;  // magic and header CRC ok
+    bool valid = false;  // magic, header CRC, payload length and payload CRC ok
     uint8_t flags = 0;
     uint16_t seq = 0;
     uint16_t command = 0;
