@@ -262,8 +262,8 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
                 // the same sizes uncompressed or as MJPG anyway.
                 if (sub == MFVideoFormat_H264 || !safety::Geometry(f.width, f.height)) continue;
                 f.fourcc = FourCc(sub);
-                const std::string key = f.Key();
-                if (std::any_of(natives.begin(), natives.end(), [&](const Native& n) { return n.format.Key() == key; }))
+                const std::string id = f.Key();
+                if (std::any_of(natives.begin(), natives.end(), [&](const Native& n) { return n.format.Key() == id; }))
                     continue;
                 natives.push_back({f, t, ScoreType(t.Get())});
             }
