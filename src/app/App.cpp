@@ -25,18 +25,21 @@ ImVec4 Hex(unsigned rgb, float alpha = 1.0f) {
     return ImVec4(static_cast<float>((rgb >> 16) & 0xFF) / 255.0f, static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
                   static_cast<float>(rgb & 0xFF) / 255.0f, alpha);
 }
+// The user's neon cyan, #67F7FF, at a given strength. Highlights use 85% of it so
+// they don't overpower the rest on high-contrast (OLED) screens; hover is the full colour.
+ImVec4 Accent(float alpha) { return Hex(0x67F7FF, alpha); }
 const ImVec4 kBg = Hex(0x06090D);
 const ImVec4 kPanel = Hex(0x0B1117);
-const ImVec4 kFrame = Hex(0x111B23);
-const ImVec4 kFrameHover = Hex(0x16242E);
-const ImVec4 kFrameActive = Hex(0x1D303C);
-const ImVec4 kBorder = Hex(0x1B2C36);
-const ImVec4 kText = Hex(0xDDF6F8);
-const ImVec4 kTextDim = Hex(0x6E8C96);
-const ImVec4 kAccent = Hex(0x67F7FF);
-const ImVec4 kAccentHover = Hex(0xA4FBFF);
-const ImVec4 kAccentDim = Hex(0x67F7FF, 0.30f);
-const ImVec4 kAccentTint = Hex(0x67F7FF, 0.12f);  // background of a selected button
+const ImVec4 kFrame = Hex(0x15222C);
+const ImVec4 kFrameHover = Hex(0x1C2E3A);
+const ImVec4 kFrameActive = Hex(0x243B4A);
+const ImVec4 kBorder = Hex(0x263C49);
+const ImVec4 kText = Hex(0xEAF6F8);
+const ImVec4 kTextDim = Hex(0x92ADB6);
+const ImVec4 kAccent = Accent(0.85f);
+const ImVec4 kAccentHover = Accent(1.0f);
+const ImVec4 kAccentDim = Accent(0.25f);
+const ImVec4 kAccentTint = Accent(0.08f);  // background of a selected button
 const ImVec4 kAccentInk = Hex(0x041418);
 const ImVec4 kGood = Hex(0x4DFF9A);
 const ImVec4 kWarn = Hex(0xFFB547);
@@ -90,7 +93,7 @@ void SectionTitle(const char* text) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     const float h = std::max(1.0f, std::round(ImGui::GetStyle().FontScaleDpi));
-    const ImU32 on = ImGui::GetColorU32(kAccentDim), off = ImGui::GetColorU32(Hex(0x67F7FF, 0.0f));
+    const ImU32 on = ImGui::GetColorU32(kAccentDim), off = ImGui::GetColorU32(Accent(0.0f));
     ImGui::GetWindowDrawList()->AddRectFilledMultiColor(ImVec2(p.x, p.y - ImGui::GetStyle().ItemSpacing.y * 0.5f),
                                                         ImVec2(p.x + w, p.y - ImGui::GetStyle().ItemSpacing.y * 0.5f + h),
                                                         on, off, off, on);
@@ -136,10 +139,10 @@ float TrackWidth(bool trailColumn, float unitSlot = 0.0f) {
 // A soft neon halo around a shape: a few fading accent outlines.
 void Glow(ImDrawList* dl, const ImVec2& a, const ImVec2& b, float rounding, float strength = 1.0f) {
     const float step = std::max(1.0f, std::round(ImGui::GetFontSize() * 0.08f));
-    for (int i = 1; i <= 3; ++i) {
+    for (int i = 1; i <= 2; ++i) {
         const float e = step * static_cast<float>(i);
         dl->AddRect(ImVec2(a.x - e, a.y - e), ImVec2(b.x + e, b.y + e),
-                    ImGui::GetColorU32(Hex(0x67F7FF, 0.20f * strength / static_cast<float>(i))), rounding + e, step);
+                    ImGui::GetColorU32(Accent(0.10f * strength / static_cast<float>(i))), rounding + e, step);
     }
 }
 
@@ -279,7 +282,7 @@ int Segmented(const char* id, const char* const* labels, int count, int selected
 bool ToggleButton(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
     if (selected) {
         ImGui::PushStyleColor(ImGuiCol_Button, kAccentTint);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Hex(0x67F7FF, 0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Accent(0.16f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccentDim);
         ImGui::PushStyleColor(ImGuiCol_Border, kAccent);
         ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
@@ -403,6 +406,7 @@ void App::ApplyTheme(float dpiScale) {
     style.ItemInnerSpacing = ImVec2(6, 6);
     style.GrabMinSize = 12.0f;
     style.ScrollbarSize = 12.0f;
+    style.DisabledAlpha = 0.70f;  // greyed-out controls stay readable
     style.SeparatorTextBorderSize = 1.0f;
 
     // Set every colour from the palette, so none of Dear ImGui's stock blue shows.
@@ -708,7 +712,7 @@ void App::DrawPreview(const CameraState& s, float width, float height) {
     }
     {
         const ImVec2 a = ImGui::GetCursorScreenPos();
-        CornerBrackets(ImGui::GetWindowDrawList(), a, ImVec2(a.x + width, a.y + height), Hex(0x67F7FF, 0.18f));
+        CornerBrackets(ImGui::GetWindowDrawList(), a, ImVec2(a.x + width, a.y + height), Accent(0.15f));
     }
 
     if (!s.connected) {
