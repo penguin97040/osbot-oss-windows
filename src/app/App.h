@@ -12,6 +12,8 @@
 #include "../preview/Preview.h"
 #include "Settings.h"
 
+struct ImFont;
+
 class App {
 public:
     void Init(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* ctx);
@@ -24,6 +26,8 @@ public:
     Settings& GetSettings() { return settings_; }
 
     static void ApplyTheme(float dpiScale);
+    // The bold face for headings; null falls back to the default font.
+    static void SetHeadingFont(ImFont* font);
 
 private:
     void ManagePreview(const CameraState& s);
@@ -38,7 +42,8 @@ private:
     void DrawAiTracking(const CameraState& s);
     void DrawGimbal(const CameraState& s);
     void DrawPresets(const CameraState& s);
-    void UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn);
+    void UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn,
+                   float unitSlot = 0.0f);
     std::string Diagnostics(const CameraState& s);
 
     HWND hwnd_ = nullptr;

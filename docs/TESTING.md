@@ -20,11 +20,15 @@ Some checks use the **Developer** tab. Turn it on with *Camera → Advanced → 
 
 ### Connection and preview
 - [ ] The header shows "OBSBOT Tiny 2 Lite" with a green dot.
-- [ ] The live preview appears, and the format at the top left reads *1280×720 NV12 30 fps (default)*
-      (or note what it shows).
-- [ ] Click the format: a list of the camera's formats opens, largest first, with the default marked.
-      Pick the largest one: the preview restarts at that size. Pick a few others, then the default again.
+- [ ] The live preview appears, and the three pickers at the top left read *1280×720*, *NV12* and
+      *30 fps* (or note what they show).
+- [ ] Open the resolution picker: sizes are listed largest first, with the default marked. Pick the
+      largest: the preview restarts at that size (the pixel format and frame rate change only if that
+      size doesn't offer them).
+- [ ] Try the pixel format (NV12/MJPG/YUY2) and frame rate pickers: each only lists what the chosen
+      size offers, and the preview restarts each time. Then go back to the default again.
 - [ ] Close and reopen the app: the preview starts at the default format again.
+- [ ] Text is sharp, not blurry, on your monitor (compare with the previous version if you can).
 - [ ] Unplug the camera: the header goes red within a few seconds. Plug it back in: it reconnects.
 - [ ] Turn off the *Live preview* switch above the preview: it stops promptly and controls still work.
 - [ ] Toggle the preview off/on several times; each restart shows new frames.
@@ -54,8 +58,10 @@ Some checks use the **Developer** tab. Turn it on with *Camera → Advanced → 
 - [ ] Drag the speed slider to both ends; the value beside it stays within 5–90°/s.
 - [ ] Recall a saved preset after changing cameras; positions stay within the selected camera's ranges.
 
-### Presets
-- [ ] Save preset 1, move away, press *Go*: it returns.
+### Presets (bottom of Gimbal and zoom)
+- [ ] With the app at its normal size, the whole Control tab fits without scrolling.
+- [ ] Click *+ Save 1*: it becomes *Preset 1*. Move away, click *Preset 1*: the camera returns.
+- [ ] Right-click *Preset 1*: *Update to the current position* and *Clear* both work.
 
 ### Image tab
 - [ ] Brightness, contrast, saturation, sharpness change the picture.

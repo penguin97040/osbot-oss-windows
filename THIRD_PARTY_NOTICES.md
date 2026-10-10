@@ -14,6 +14,26 @@ including the Win32 and DirectX 11 backends. `src/main.cpp` is based on its
 >
 > See `third_party/imgui/LICENSE.txt` for the full licence text.
 
+`third_party/imgui/misc/freetype/` is Dear ImGui's FreeType font loader, from the same release.
+
+### FreeType
+
+The app links FreeType 2.13.3 statically (downloaded at build time from the official
+repository) under the FreeType Licence (FTL):
+
+> Portions of this software are copyright © 2024 The FreeType Project (www.freetype.org).
+> All rights reserved.
+
+### Chakra Petch font
+
+`third_party/fonts/chakra-petch/` contains Chakra Petch Regular and SemiBold, built into the exe
+as resources.
+
+> Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
+>
+> Licensed under the SIL Open Font Licence, Version 1.1. See
+> `third_party/fonts/chakra-petch/OFL.txt` for the full licence text.
+
 ## Protocol information (no code copied)
 
 The camera command bytes in `src/camera/ObsbotProtocol.cpp` and `docs/PROTOCOL.md`
@@ -30,4 +50,5 @@ are facts learnt from these projects. Thank you to their authors:
 
 - The **OBSBOT SDK** (`libdev`) is proprietary, is not used by this app, and is never
   committed to this repository.
-- **Segoe UI** is loaded at runtime from the user's own Windows installation and is not redistributed.
+- **Segoe UI** is only a fallback: if the built-in font can't be loaded, it's read from the user's own
+  Windows installation and is not redistributed.

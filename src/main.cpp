@@ -15,6 +15,7 @@
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
+#include "misc/freetype/imgui_freetype.h"
 #include "version.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -114,14 +115,35 @@ void UseDarkTitleBar(HWND hwnd) {
     BOOL dark = TRUE;
     if (FAILED(DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark)))
         DwmSetWindowAttribute(hwnd, 19 /* pre-20H1 value */, &dark, sizeof dark);
-    COLORREF caption = RGB(0x0F, 0x11, 0x15);  // matches the window background (Windows 11 only)
+    COLORREF caption = RGB(0x06, 0x09, 0x0D);  // matches the window background (Windows 11 only)
     DwmSetWindowAttribute(hwnd, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
+}
+
+// A font built into the exe (res/app.rc). Resource memory lives as long as the
+// process, so the atlas must not try to free it.
+ImFont* AddResourceFont(int id) {
+    HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+    HGLOBAL handle = res ? LoadResource(nullptr, res) : nullptr;
+    void* data = handle ? LockResource(handle) : nullptr;
+    const DWORD size = res ? SizeofResource(nullptr, res) : 0;
+    if (!data || size == 0) return nullptr;
+    ImFontConfig config;
+    config.FontDataOwnedByAtlas = false;
+    return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(data, static_cast<int>(size), 0.0f, &config);
 }
 
 void LoadFonts() {
     ImGuiIO& io = ImGui::GetIO();
-    // Segoe UI ships with Windows; we load it from the system rather than
-    // redistributing it. Falls back to Dear ImGui's built-in font.
+    // FreeType's light hinting snaps glyphs to the pixel grid vertically, which
+    // keeps small text sharp (unhinted text looks soft, especially on OLED panels).
+    io.Fonts->FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
+
+    // Chakra Petch is built in. Falls back to Segoe UI (shipped with Windows),
+    // then to Dear ImGui's own font.
+    if (AddResourceFont(101)) {  // the first font added is the default
+        App::SetHeadingFont(AddResourceFont(102));
+        return;
+    }
     wchar_t winDir[MAX_PATH];
     UINT n = GetWindowsDirectoryW(winDir, MAX_PATH);
     if (n > 0 && n < MAX_PATH) {
@@ -220,7 +242,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hIconSm = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(0x0F, 0x11, 0x15));
+    wc.hbrBackground = CreateSolidBrush(RGB(0x06, 0x09, 0x0D));
     wc.lpszClassName = kWindowClass;
     window.brush = wc.hbrBackground;
     if (!RegisterClassExW(&wc)) {
@@ -267,7 +289,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
 
     app.Init(hwnd, g_device, g_context);
 
-    const float clear[4] = {0.059f, 0.067f, 0.082f, 1.0f};
+    const float clear[4] = {0.024f, 0.035f, 0.051f, 1.0f};  // #06090D, as kBg
     bool done = false;
     bool graphicsFailed = false;
     int busyFrames = 0;

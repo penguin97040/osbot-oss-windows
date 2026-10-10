@@ -22,11 +22,11 @@ Inspired by [obsbot4linux](https://github.com/vampyren/obsbot4linux), which does
 | Area | Controls |
 |---|---|
 | AI tracking | Off, Normal, Upper body, Close-up, Headless, Lower body, Group, Hand, Whiteboard, Desk; Standard/Sport speed |
-| Gimbal | Hold-to-move arrows (smooth or stepped, with invert switches), Centre, pan/tilt sliders, 3 presets |
+| Gimbal | Hold-to-move arrows (smooth or stepped, with invert switches), Centre, pan/tilt sliders, 3 one-click presets |
 | Zoom | Zoom slider |
 | Picture | Brightness, contrast, saturation, sharpness, hue, gamma, white balance, exposure, gain, backlight, focus (with Auto where supported) |
 | Camera | HDR, field of view (wide/medium/narrow), anti-flicker (50 Hz default for NZ), sleep/wake |
-| Other | Live preview with a format picker (can be turned off), activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
+| Other | Live preview with resolution, pixel format and frame rate pickers (can be turned off), activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
 
 ## Download and run
 
@@ -69,7 +69,10 @@ cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.c
 cmake --build build-win
 ```
 
-Protocol and safety regression tests run anywhere: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
+The first configure downloads FreeType 2.13.3 (pinned by checksum) for sharper text; it's
+linked into the exe, so nothing extra ships beside it.
+
+Protocol, safety and preview-format regression tests run anywhere: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
 
 The official release uses MSVC with restricted system DLL loading. MinGW development builds
 still resolve static DLL imports before startup, so they retain the risk of a malicious DLL

@@ -1,9 +1,13 @@
-// Resources: icon, manifest and version info (language en-NZ, 0x1409).
+// Resources: icon, manifest, fonts and version info (language en-NZ, 0x1409).
 #include <winver.h>
 #include "version.h"
 
 1 ICON "icon.ico"
 1 24 "app.manifest"
+
+// Chakra Petch (SIL Open Font Licence 1.1), built in so the exe stays a single file.
+101 RCDATA "../third_party/fonts/chakra-petch/ChakraPetch-Regular.ttf"
+102 RCDATA "../third_party/fonts/chakra-petch/ChakraPetch-SemiBold.ttf"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION OSBOT_VERSION_MAJOR, OSBOT_VERSION_MINOR, OSBOT_VERSION_PATCH, 0

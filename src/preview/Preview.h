@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstdio>
 #include <mutex>
 #include <memory>
 #include <string>
@@ -15,28 +14,9 @@
 #include <vector>
 
 #include "../Safety.h"
+#include "PreviewFormat.h"
 
 struct PreviewReadState;
-
-// One of the camera's native capture formats.
-struct PreviewFormat {
-    uint32_t width = 0, height = 0, fpsNum = 0, fpsDen = 1;
-    std::string fourcc;  // e.g. "NV12", "MJPG"
-
-    double Fps() const { return fpsDen ? static_cast<double>(fpsNum) / fpsDen : 0.0; }
-    // Exact identity, used to ask for this format again.
-    std::string Key() const {
-        char buf[64];
-        snprintf(buf, sizeof buf, "%ux%u:%s:%u/%u", width, height, fourcc.c_str(), fpsNum, fpsDen);
-        return buf;
-    }
-    // e.g. "1280×720 NV12 30 fps"
-    std::string Label() const {
-        char buf[64];
-        snprintf(buf, sizeof buf, "%u\xC3\x97%u %s %.0f fps", width, height, fourcc.c_str(), Fps());
-        return buf;
-    }
-};
 
 class Preview {
 public:

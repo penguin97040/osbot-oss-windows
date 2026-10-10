@@ -20,7 +20,9 @@ find_package(Threads REQUIRED)
 target_link_libraries(safety_tests PRIVATE Threads::Threads)
 add_test(NAME safety_tests COMMAND safety_tests)
 set_tests_properties(safety_tests PROPERTIES TIMEOUT 15)
-foreach(test_target protocol_tests safety_tests)
+add_executable(preview_format_tests tests/preview_format_tests.cpp)
+add_test(NAME preview_format_tests COMMAND preview_format_tests)
+foreach(test_target protocol_tests safety_tests preview_format_tests)
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /W4 /WX /utf-8)
     set_property(TARGET ${test_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -40,6 +42,29 @@ endif()
 
 enable_language(RC)
 
+# Static CRT for everything built from here on (including FreeType), so the exe
+# runs without the Visual C++ Redistributable.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# ---- FreeType: hinted, sharper text than Dear ImGui's built-in rasteriser ----
+# Downloaded once at configure time (pinned by hash) and linked statically.
+include(FetchContent)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+foreach(ft_option ZLIB BZIP2 PNG HARFBUZZ BROTLI)
+  set(FT_DISABLE_${ft_option} ON CACHE BOOL "" FORCE)
+endforeach()
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(freetype
+  URL https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3
+  URL_HASH SHA256=bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+# FreeType 2.13 still declares CMake 3.0 compatibility; treat it as 3.10 so newer
+# CMake doesn't print a deprecation warning.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+FetchContent_MakeAvailable(freetype)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
+
 # ---- The app: one self-contained exe ----
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
 configure_file(src/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
@@ -58,6 +83,7 @@ add_executable(osbot-oss-windows WIN32
   ${IMGUI_DIR}/imgui_draw.cpp
   ${IMGUI_DIR}/imgui_tables.cpp
   ${IMGUI_DIR}/imgui_widgets.cpp
+  ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
   ${IMGUI_DIR}/backends/imgui_impl_win32.cpp
   ${IMGUI_DIR}/backends/imgui_impl_dx11.cpp
 )
@@ -73,6 +99,7 @@ target_include_directories(osbot-oss-windows PRIVATE
 target_compile_definitions(osbot-oss-windows PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00
   IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+  IMGUI_ENABLE_FREETYPE
   # No gamepad navigation, so don't probe for XInput DLLs at all.
   IMGUI_IMPL_WIN32_DISABLE_GAMEPAD
 )
@@ -82,11 +109,10 @@ target_link_libraries(osbot-oss-windows PRIVATE
   ole32 oleaut32 uuid strmiids
   mfplat mfreadwrite mf mfuuid
   shell32 imm32
+  freetype
 )
 
 if(MSVC)
-  # Static CRT so the exe runs without the Visual C++ Redistributable.
-  set_property(TARGET osbot-oss-windows PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_compile_options(osbot-oss-windows PRIVATE /W4 /WX /utf-8 /permissive- /wd4100)
   target_compile_definitions(osbot-oss-windows PRIVATE _CRT_SECURE_NO_WARNINGS)
   # The manifest is embedded via res/app.rc.

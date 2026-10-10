@@ -17,24 +17,32 @@ using obsbot::Fov;
 
 namespace {
 
-// ---- Palette (dark) -------------------------------------------------------------
-// One accent colour marks everything that is on, selected or active. Green, amber
-// and red are kept for status only (connection pill, log levels, warnings).
-const ImVec4 kBg = ImVec4(0.059f, 0.067f, 0.082f, 1.0f);         // #0F1115
-const ImVec4 kPanel = ImVec4(0.086f, 0.102f, 0.125f, 1.0f);      // #161A20
-const ImVec4 kFrame = ImVec4(0.137f, 0.157f, 0.196f, 1.0f);      // #232832
-const ImVec4 kFrameHover = ImVec4(0.169f, 0.196f, 0.243f, 1.0f); // #2B323E
-const ImVec4 kFrameActive = ImVec4(0.204f, 0.239f, 0.294f, 1.0f); // #343D4B
-const ImVec4 kBorder = ImVec4(0.180f, 0.204f, 0.243f, 1.0f);     // #2E343E
-const ImVec4 kText = ImVec4(0.902f, 0.910f, 0.922f, 1.0f);       // #E6E8EB
-const ImVec4 kTextDim = ImVec4(0.545f, 0.576f, 0.631f, 1.0f);    // #8B93A1
-const ImVec4 kAccent = ImVec4(0.310f, 0.549f, 1.0f, 1.0f);       // #4F8CFF
-const ImVec4 kAccentHover = ImVec4(0.416f, 0.620f, 1.0f, 1.0f);  // #6A9EFF
-const ImVec4 kAccentDim = ImVec4(0.310f, 0.549f, 1.0f, 0.35f);
-const ImVec4 kWhite = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-const ImVec4 kGood = ImVec4(0.298f, 0.788f, 0.486f, 1.0f);
-const ImVec4 kWarn = ImVec4(0.961f, 0.722f, 0.259f, 1.0f);
-const ImVec4 kBad = ImVec4(0.937f, 0.353f, 0.353f, 1.0f);
+// ---- Palette (dark, neon) ----------------------------------------------------------
+// Near-black with a faint teal tint and one neon accent for everything that is on,
+// selected or active. Green, amber and red are kept for status only (connection
+// pill, log levels, warnings). Text on a solid accent fill uses kAccentInk.
+ImVec4 Hex(unsigned rgb, float alpha = 1.0f) {
+    return ImVec4(static_cast<float>((rgb >> 16) & 0xFF) / 255.0f, static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
+                  static_cast<float>(rgb & 0xFF) / 255.0f, alpha);
+}
+const ImVec4 kBg = Hex(0x06090D);
+const ImVec4 kPanel = Hex(0x0B1117);
+const ImVec4 kFrame = Hex(0x111B23);
+const ImVec4 kFrameHover = Hex(0x16242E);
+const ImVec4 kFrameActive = Hex(0x1D303C);
+const ImVec4 kBorder = Hex(0x1B2C36);
+const ImVec4 kText = Hex(0xDDF6F8);
+const ImVec4 kTextDim = Hex(0x6E8C96);
+const ImVec4 kAccent = Hex(0x67F7FF);
+const ImVec4 kAccentHover = Hex(0xA4FBFF);
+const ImVec4 kAccentDim = Hex(0x67F7FF, 0.30f);
+const ImVec4 kAccentTint = Hex(0x67F7FF, 0.12f);  // background of a selected button
+const ImVec4 kAccentInk = Hex(0x041418);
+const ImVec4 kGood = Hex(0x4DFF9A);
+const ImVec4 kWarn = Hex(0xFFB547);
+const ImVec4 kBad = Hex(0xFF4D6D);
+
+ImFont* g_headingFont = nullptr;
 
 const UvcInfo& U(const CameraState& s, UvcCtl c) { return s.uvc[static_cast<size_t>(c)]; }
 
@@ -43,7 +51,9 @@ const UvcInfo& U(const CameraState& s, UvcCtl c) { return s.uvc[static_cast<size
 //   label | control (stretches) | value (right-aligned) | trailing (Auto switch)
 float LabelWidth() { return ImGui::GetFontSize() * 8.0f; }
 float CompactLabelWidth() { return ImGui::GetFontSize() * 3.0f; }
-float ValueWidth() { return ImGui::GetFontSize() * 3.6f; }
+float ValueWidth() { return ImGui::GetFontSize() * 3.2f; }
+// Room after a number for its unit, so digits line up whether or not a unit follows.
+float UnitSlot() { return ImGui::CalcTextSize("\xC2\xB0/s").x; }
 float Gap() { return ImGui::GetStyle().ItemSpacing.x; }
 float SwitchHeight() { return std::round(ImGui::GetFontSize() * 1.05f); }
 float SwitchWidth() { return std::round(SwitchHeight() * 1.8f); }
@@ -69,13 +79,22 @@ void HelpMarker(const char* text) {
     Tooltip(text);
 }
 
+// A heading in the bold face and accent colour over a thin line that fades out.
 void SectionTitle(const char* text) {
-    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y * 0.5f));
-    ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
+    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y * 0.25f));
+    if (g_headingFont) ImGui::PushFont(g_headingFont, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
     ImGui::TextUnformatted(text);
     ImGui::PopStyleColor();
-    ImGui::Separator();
-    ImGui::Spacing();
+    if (g_headingFont) ImGui::PopFont();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float h = std::max(1.0f, std::round(ImGui::GetStyle().FontScaleDpi));
+    const ImU32 on = ImGui::GetColorU32(kAccentDim), off = ImGui::GetColorU32(Hex(0x67F7FF, 0.0f));
+    ImGui::GetWindowDrawList()->AddRectFilledMultiColor(ImVec2(p.x, p.y - ImGui::GetStyle().ItemSpacing.y * 0.5f),
+                                                        ImVec2(p.x + w, p.y - ImGui::GetStyle().ItemSpacing.y * 0.5f + h),
+                                                        on, off, off, on);
+    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y * 0.25f));
 }
 
 // Starts a row: the label in a column labelWidth wide (with an optional help
@@ -92,19 +111,36 @@ void RowLabel(const char* label, float labelWidth, const char* help = nullptr) {
 }
 void RowLabel(const char* label, const char* help = nullptr) { RowLabel(label, LabelWidth(), help); }
 
-// A value shown beside its slider, right-aligned in the value column.
-void ValueText(const char* text) {
+// A value shown beside its slider: the number right-aligned in the value column,
+// then its unit (if any) in the unit slot TrackWidth left, so every number ends at
+// the same x.
+void ValueText(const char* number, const char* unit = "") {
     ImGui::SameLine(0, Gap());
     const float x = ImGui::GetCursorPosX();
-    ImGui::SetCursorPosX(x + std::max(0.0f, ValueWidth() - ImGui::CalcTextSize(text).x));
+    ImGui::SetCursorPosX(x + std::max(0.0f, ValueWidth() - ImGui::CalcTextSize(number).x));
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(text);
+    ImGui::TextUnformatted(number);
+    if (*unit) {
+        ImGui::SameLine(0, 0);
+        ImGui::TextUnformatted(unit);
+    }
 }
 
-// Width left for a slider track once the value (and optional trailing) column is reserved.
-float TrackWidth(bool trailColumn) {
-    return std::max(ImGui::GetFontSize() * 3.0f,
-                    ImGui::GetContentRegionAvail().x - Gap() - ValueWidth() - (trailColumn ? Gap() + TrailWidth() : 0.0f));
+// Width left for a slider track once the value column (with its unit slot) and the
+// optional trailing column are reserved.
+float TrackWidth(bool trailColumn, float unitSlot = 0.0f) {
+    return std::max(ImGui::GetFontSize() * 3.0f, ImGui::GetContentRegionAvail().x - Gap() - ValueWidth() - unitSlot -
+                                                     (trailColumn ? Gap() + TrailWidth() : 0.0f));
+}
+
+// A soft neon halo around a shape: a few fading accent outlines.
+void Glow(ImDrawList* dl, const ImVec2& a, const ImVec2& b, float rounding, float strength = 1.0f) {
+    const float step = std::max(1.0f, std::round(ImGui::GetFontSize() * 0.08f));
+    for (int i = 1; i <= 3; ++i) {
+        const float e = step * static_cast<float>(i);
+        dl->AddRect(ImVec2(a.x - e, a.y - e), ImVec2(b.x + e, b.y + e),
+                    ImGui::GetColorU32(Hex(0x67F7FF, 0.20f * strength / static_cast<float>(i))), rounding + e, step);
+    }
 }
 
 // A slim slider: a thin rounded track, accent fill and a round grab. The value is
@@ -150,8 +186,10 @@ bool SliderTrack(const char* id, ImGuiDataType type, void* value, const void* mi
                       ImGui::GetColorU32(hovered || active ? kFrameActive : kFrameHover), track * 0.5f);
     dl->AddRectFilled(ImVec2(x0, cy - track * 0.5f), ImVec2(gx, cy + track * 0.5f),
                       ImGui::GetColorU32(active ? kAccentHover : kAccent), track * 0.5f);
-    dl->AddCircleFilled(ImVec2(gx, cy), radius, ImGui::GetColorU32(kText));
-    dl->AddCircle(ImVec2(gx, cy), radius, ImGui::GetColorU32(active ? kAccentHover : kAccent), 0, 2.0f);
+    if (hovered || active) Glow(dl, ImVec2(gx - radius, cy - radius), ImVec2(gx + radius, cy + radius), radius);
+    dl->AddCircleFilled(ImVec2(gx, cy), radius, ImGui::GetColorU32(kBg));
+    dl->AddCircle(ImVec2(gx, cy), radius, ImGui::GetColorU32(active ? kAccentHover : kAccent), 0,
+                  std::max(2.0f, std::round(ImGui::GetFontSize() * 0.12f)));
     return changed;
 }
 
@@ -171,15 +209,20 @@ bool ToggleSwitch(const char* label, bool* v) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float top = std::round(p.y + (h - sh) * 0.5f);
     const ImVec2 a(p.x, top), b(p.x + sw, top + sh);
+    const float rounding = std::round(sh * 0.3f);
     if (*v) {
-        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), sh * 0.5f);
+        Glow(dl, a, b, rounding);
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), rounding);
     } else {
-        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kFrameActive : kFrameHover), sh * 0.5f);
-        dl->AddRect(a, b, ImGui::GetColorU32(kBorder), sh * 0.5f);
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kFrameActive : kFrameHover), rounding);
+        dl->AddRect(a, b, ImGui::GetColorU32(hovered ? kAccentDim : kBorder), rounding);
     }
-    const float r = sh * 0.5f - std::max(2.0f, sh * 0.14f);
-    const float cx = *v ? b.x - sh * 0.5f : a.x + sh * 0.5f;
-    dl->AddCircleFilled(ImVec2(cx, top + sh * 0.5f), r, ImGui::GetColorU32(*v ? kWhite : kText));
+    // A squared-off knob.
+    const float inset = std::max(2.0f, std::round(sh * 0.16f));
+    const float k = sh - inset * 2;
+    const float kx = *v ? b.x - inset - k : a.x + inset;
+    dl->AddRectFilled(ImVec2(kx, top + inset), ImVec2(kx + k, top + inset + k),
+                      ImGui::GetColorU32(*v ? kAccentInk : kTextDim), std::max(1.0f, rounding - inset));
     if (textW > 0)
         dl->AddText(ImVec2(b.x + ImGui::GetStyle().ItemInnerSpacing.x, p.y + ImGui::GetStyle().FramePadding.y),
                     ImGui::GetColorU32(ImGuiCol_Text), label, end);
@@ -212,14 +255,17 @@ int Segmented(const char* id, const char* const* labels, int count, int selected
         ImGui::RenderNavCursor(ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()), ImGui::GetItemID());
         if (tooltips && tooltips[i]) Tooltip(tooltips[i]);
         const ImVec2 a(xa + inset, p.y + inset), b(xb - inset, p.y + h - inset);
-        if (i == selected)
-            dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), rounding - inset * 0.5f);
-        else if (hovered)
-            dl->AddRectFilled(a, b, ImGui::GetColorU32(kFrameHover), rounding - inset * 0.5f);
+        const float r = std::max(0.0f, rounding - inset * 0.5f);
+        if (i == selected) {
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(kAccentTint), r);
+            dl->AddRect(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), r);
+        } else if (hovered) {
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(kFrameHover), r);
+        }
         const ImVec2 ts = ImGui::CalcTextSize(labels[i]);
         dl->PushClipRect(ImVec2(xa, p.y), ImVec2(xb, p.y + h), true);
         dl->AddText(ImVec2(std::round((xa + xb - ts.x) * 0.5f), std::round(p.y + (h - ts.y) * 0.5f)),
-                    ImGui::GetColorU32(i == selected ? kWhite : kText), labels[i]);
+                    ImGui::GetColorU32(i == selected ? kAccent : kText), labels[i]);
         dl->PopClipRect();
     }
     // Leave the cursor on the next line, as a normal full-width item would.
@@ -229,17 +275,21 @@ int Segmented(const char* id, const char* const* labels, int count, int selected
     return clicked;
 }
 
-// A button that looks "on" when selected.
+// A button that lights up (neon outline, accent text and a soft glow) when selected.
 bool ToggleButton(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
     if (selected) {
-        ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccentHover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccent);
+        ImGui::PushStyleColor(ImGuiCol_Button, kAccentTint);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Hex(0x67F7FF, 0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccentDim);
         ImGui::PushStyleColor(ImGuiCol_Border, kAccent);
-        ImGui::PushStyleColor(ImGuiCol_Text, kWhite);
+        ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
     }
     bool pressed = ImGui::Button(label, size);
-    if (selected) ImGui::PopStyleColor(5);
+    if (selected) {
+        ImGui::PopStyleColor(5);
+        Glow(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+             ImGui::GetStyle().FrameRounding, 0.8f);
+    }
     return pressed;
 }
 
@@ -252,8 +302,11 @@ void StatusPill(const char* text, const ImVec4& colour) {
                       textSize.y + pad.y * 2);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float rounding = ImGui::GetStyle().FrameRounding;
     dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y),
-                      ImGui::GetColorU32(ImVec4(colour.x, colour.y, colour.z, 0.15f)), size.y * 0.5f);
+                      ImGui::GetColorU32(ImVec4(colour.x, colour.y, colour.z, 0.10f)), rounding);
+    dl->AddRect(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::GetColorU32(ImVec4(colour.x, colour.y, colour.z, 0.45f)),
+                rounding);
     dl->AddCircleFilled(ImVec2(p.x + pad.x + dot, p.y + size.y * 0.5f), dot, ImGui::GetColorU32(colour));
     dl->AddText(ImVec2(p.x + pad.x + dot * 2 + ImGui::GetStyle().ItemInnerSpacing.x, p.y + pad.y),
                 ImGui::GetColorU32(colour), text);
@@ -277,6 +330,19 @@ bool ArrowPadButton(const char* id, ImGuiDir dir, float size) {
     default: break;
     }
     return held;
+}
+
+// HUD-style corner brackets around a rectangle.
+void CornerBrackets(ImDrawList* dl, const ImVec2& a, const ImVec2& b, const ImVec4& colour) {
+    const float len = std::min({ImGui::GetFontSize() * 1.2f, (b.x - a.x) * 0.25f, (b.y - a.y) * 0.25f});
+    const float t = std::max(1.0f, std::round(ImGui::GetStyle().FontScaleDpi * 1.5f));
+    const ImU32 c = ImGui::GetColorU32(colour);
+    const ImVec2 corners[4] = {a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y)};
+    for (const ImVec2& p : corners) {
+        const float sx = p.x == a.x ? 1.0f : -1.0f, sy = p.y == a.y ? 1.0f : -1.0f;
+        dl->AddLine(p, ImVec2(p.x + sx * len, p.y), c, t);
+        dl->AddLine(p, ImVec2(p.x, p.y + sy * len), c, t);
+    }
 }
 
 const char* AntiFlickerName(long v) {
@@ -318,13 +384,15 @@ void App::ApplyTheme(float dpiScale) {
     style = ImGuiStyle();
     ImGui::StyleColorsDark(&style);
 
+    // Small radii for a crisper, machined look.
     style.WindowRounding = 0.0f;
-    style.ChildRounding = 8.0f;
-    style.FrameRounding = 6.0f;
-    style.PopupRounding = 6.0f;
-    style.GrabRounding = 6.0f;
-    style.TabRounding = 6.0f;
-    style.ScrollbarRounding = 6.0f;
+    style.ChildRounding = 4.0f;
+    style.FrameRounding = 3.0f;
+    style.PopupRounding = 3.0f;
+    style.GrabRounding = 3.0f;
+    style.TabRounding = 3.0f;
+    style.ScrollbarRounding = 3.0f;
+    style.TabBarOverlineSize = 2.0f;
     style.WindowBorderSize = 0.0f;
     style.ChildBorderSize = 1.0f;
     style.PopupBorderSize = 1.0f;
@@ -400,10 +468,13 @@ void App::ApplyTheme(float dpiScale) {
     c[ImGuiCol_NavWindowingDimBg] = ImVec4(0, 0, 0, 0.5f);
     c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.5f);
 
-    style.FontSizeBase = 17.0f;
+    // Whole pixels at this DPI, so hinted glyphs land exactly on the pixel grid.
+    style.FontSizeBase = std::round(18.0f * dpiScale) / dpiScale;
     style.ScaleAllSizes(dpiScale);
     style.FontScaleDpi = dpiScale;
 }
+
+void App::SetHeadingFont(ImFont* font) { g_headingFont = font; }
 
 // ---- Lifecycle --------------------------------------------------------------------------
 
@@ -489,7 +560,11 @@ void App::Frame() {
 
 void App::DrawHeader(const CameraState& s) {
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("osbot-oss");
+    if (g_headingFont) ImGui::PushFont(g_headingFont, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
+    ImGui::TextUnformatted("OSBOT-OSS");
+    ImGui::PopStyleColor();
+    if (g_headingFont) ImGui::PopFont();
     ImGui::SameLine();
     const bool asleep = s.status.valid && s.status.asleep;
     const ImVec4 colour = !s.connected ? kBad : asleep ? kWarn : kGood;
@@ -531,34 +606,66 @@ void App::DrawHeader(const CameraState& s) {
     ImGui::Spacing();
 }
 
-// The strip above the video: the capture format on the left, the preview switch on the right.
+// The strip above the video: resolution, pixel format and frame rate pickers on
+// the left, the preview switch on the right.
 void App::DrawPreviewToolbar(const CameraState& s) {
+    namespace pf = preview_format;
     const std::vector<PreviewFormat> formats = preview_.Formats();
-    const bool showFormats = s.connected && settings_.previewEnabled && !formats.empty();
-    if (showFormats) {
-        const std::string defaultKey = preview_.DefaultFormatKey();
-        const std::string currentKey = preview_.CurrentFormatKey();
-        std::string shown = preview_.Format();
-        if (shown.empty()) {
-            const std::string& wanted = previewFormatKey_.empty() ? defaultKey : previewFormatKey_;
-            for (const auto& f : formats)
-                if (f.Key() == wanted) shown = f.Label();
-        }
-        if (ImGui::BeginCombo("##format", shown.empty() ? "Format" : shown.c_str(),
-                              ImGuiComboFlags_WidthFitPreview | ImGuiComboFlags_HeightLarge)) {
-            for (const auto& f : formats) {
-                const std::string key = f.Key();
-                std::string item = f.Label();
-                if (key == defaultKey) item += "  (default)";
-                item += "##" + key;
-                if (ImGui::Selectable(item.c_str(), key == currentKey)) {
-                    previewFormatKey_ = key == defaultKey ? std::string() : key;
-                    previewAttemptPath_.clear();
-                }
+    const std::string defaultKey = preview_.DefaultFormatKey();
+    const PreviewFormat* def = pf::Find(formats, defaultKey);
+    // What's showing now: the running format, else the one asked for, else the default.
+    const PreviewFormat* cur = pf::Find(formats, preview_.CurrentFormatKey());
+    if (!cur) cur = pf::Find(formats, previewFormatKey_.empty() ? defaultKey : previewFormatKey_);
+    if (!cur) cur = def;
+
+    if (s.connected && settings_.previewEnabled && cur) {
+        const ImGuiComboFlags flags = ImGuiComboFlags_WidthFitPreview | ImGuiComboFlags_HeightLarge;
+        auto choose = [&](uint32_t w, uint32_t h, const std::string& fourcc, int fps) {
+            const std::string key = pf::Choose(formats, w, h, fourcc, fps, def ? def->fourcc : std::string());
+            if (key.empty()) return;
+            previewFormatKey_ = key == defaultKey ? std::string() : key;
+            previewAttemptPath_.clear();
+        };
+        auto item = [](std::string text, bool isDefault) {
+            if (isDefault) text += "  (default)";
+            return text;
+        };
+        const bool defSize = def && def->width == cur->width && def->height == cur->height;
+
+        if (ImGui::BeginCombo("##size", PreviewFormat::SizeLabel(cur->width, cur->height).c_str(), flags)) {
+            for (const auto& [w, h] : pf::Resolutions(formats)) {
+                const bool isDefault = def && def->width == w && def->height == h;
+                const std::string text = item(PreviewFormat::SizeLabel(w, h), isDefault);
+                if (ImGui::Selectable(text.c_str(), w == cur->width && h == cur->height))
+                    choose(w, h, cur->fourcc, cur->RoundedFps());
             }
             ImGui::EndCombo();
         }
-        ImGui::SetItemTooltip("Preview resolution and frame rate. Larger sizes use more processor time.");
+        ImGui::SetItemTooltip("Preview resolution. Larger sizes use more processor time.");
+
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (ImGui::BeginCombo("##pixels", cur->fourcc.c_str(), flags)) {
+            for (const std::string& fourcc : pf::PixelFormats(formats, cur->width, cur->height)) {
+                const std::string text = item(fourcc, defSize && def->fourcc == fourcc);
+                if (ImGui::Selectable(text.c_str(), fourcc == cur->fourcc))
+                    choose(cur->width, cur->height, fourcc, cur->RoundedFps());
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("How the camera sends each frame. NV12 and YUY2 are uncompressed; "
+                              "MJPG is compressed and allows higher frame rates at large sizes.");
+
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        if (ImGui::BeginCombo("##rate", PreviewFormat::FpsLabel(cur->RoundedFps()).c_str(), flags)) {
+            for (const int fps : pf::FrameRates(formats, cur->width, cur->height, cur->fourcc)) {
+                const bool isDefault = defSize && def->fourcc == cur->fourcc && def->RoundedFps() == fps;
+                const std::string text = item(PreviewFormat::FpsLabel(fps), isDefault);
+                if (ImGui::Selectable(text.c_str(), fps == cur->RoundedFps()))
+                    choose(cur->width, cur->height, cur->fourcc, fps);
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Preview frame rate.");
         ImGui::SameLine();
     } else {
         ImGui::AlignTextToFramePadding();
@@ -596,7 +703,12 @@ void App::DrawPreview(const CameraState& s, float width, float height) {
         const ImVec2 size(texW * scale, texH * scale);
         ImGui::SetCursorPos(ImVec2(start.x + (width - size.x) * 0.5f, start.y + (height - size.y) * 0.5f));
         ImGui::Image(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(srv))), size);
+        CornerBrackets(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), kAccentDim);
         return;
+    }
+    {
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        CornerBrackets(ImGui::GetWindowDrawList(), a, ImVec2(a.x + width, a.y + height), Hex(0x67F7FF, 0.18f));
     }
 
     if (!s.connected) {
@@ -624,7 +736,6 @@ void App::DrawControlTab(const CameraState& s) {
     ImGui::BeginDisabled(!s.connected);
     DrawAiTracking(s);
     DrawGimbal(s);
-    DrawPresets(s);
     ImGui::EndDisabled();
 }
 
@@ -710,16 +821,16 @@ void App::DrawGimbal(const CameraState& s) {
         const float perDeg = (static_cast<int64_t>(u.max) - u.min) > 3600 ? 3600.0f : 1.0f;
         float deg = u.value / perDeg;
         const float mn = u.min / perDeg, mx = u.max / perDeg;
-        if (SliderTrack("##v", ImGuiDataType_Float, &deg, &mn, &mx, "%.0f", TrackWidth(false)))
+        if (SliderTrack("##v", ImGuiDataType_Float, &deg, &mn, &mx, "%.0f", TrackWidth(false, UnitSlot())))
             worker_.SetUvc(c, safety::AngleValue(deg, perDeg, u.min, u.max), false);
         char buf[32];
-        snprintf(buf, sizeof buf, "%.0f\xC2\xB0", deg);
-        ValueText(buf);
+        snprintf(buf, sizeof buf, "%.0f", deg);
+        ValueText(buf, "\xC2\xB0");
         ImGui::PopID();
     };
     angleSlider(UvcCtl::Pan, "Pan");
     angleSlider(UvcCtl::Tilt, "Tilt");
-    UvcSlider(s, UvcCtl::Zoom, "Zoom", CompactLabelWidth(), false);
+    UvcSlider(s, UvcCtl::Zoom, "Zoom", CompactLabelWidth(), false, UnitSlot());
     ImGui::EndGroup();
     const float groupBottom = ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY();
     ImGui::SetCursorPos(ImVec2(origin.x, std::max(origin.y + padH, groupBottom) + ImGui::GetStyle().ItemSpacing.y));
@@ -739,12 +850,13 @@ void App::DrawGimbal(const CameraState& s) {
     ImGui::BeginDisabled(!smooth);
     RowLabel("Speed");
     const float minSpeed = 5.0f, maxSpeed = 90.0f;
-    SliderTrack("##speed", ImGuiDataType_Float, &settings_.moveSpeed, &minSpeed, &maxSpeed, "%.0f", TrackWidth(false));
+    SliderTrack("##speed", ImGuiDataType_Float, &settings_.moveSpeed, &minSpeed, &maxSpeed, "%.0f",
+                TrackWidth(false, UnitSlot()));
     if (!smooth) ImGui::SetItemTooltip("Only used by Smooth movement.");
     settings_.moveSpeed = safety::MoveSpeed(settings_.moveSpeed);
     char speedText[32];
-    snprintf(speedText, sizeof speedText, "%.0f\xC2\xB0/s", settings_.moveSpeed);
-    ValueText(speedText);
+    snprintf(speedText, sizeof speedText, "%.0f", settings_.moveSpeed);
+    ValueText(speedText, "\xC2\xB0/s");
     ImGui::EndDisabled();
 
     RowLabel("Invert");
@@ -753,6 +865,8 @@ void App::DrawGimbal(const CameraState& s) {
     ImGui::SameLine(0, Gap() * 3);
     if (ToggleSwitch("Vertical", &settings_.invertVertical)) settings_.Save();
     ImGui::SetItemTooltip("Swap the up and down arrows.");
+
+    DrawPresets(s);
 
     // Hold-to-move. MoveSigns knows which axis each method runs the opposite way
     // on (checked on a Tiny 2 Lite) and applies the invert switches on top.
@@ -780,36 +894,57 @@ void App::DrawGimbal(const CameraState& s) {
     }
 }
 
+// One row of three presets: click an empty one to save the current position, a
+// saved one to go back to it; right-click either to update or clear it.
 void App::DrawPresets(const CameraState& s) {
-    SectionTitle("PRESETS");
     const bool usable = U(s, UvcCtl::Pan).supported && U(s, UvcCtl::Tilt).supported;
+    RowLabel("Presets", "Click an empty preset to save where the camera is pointing. Click a saved one to go "
+                        "back there. Right-click a preset to update or clear it.");
     ImGui::BeginDisabled(!usable);
+    const float bw = EqualWidth(static_cast<int>(settings_.presets.size()));
     for (size_t i = 0; i < settings_.presets.size(); ++i) {
         Preset& p = settings_.presets[i];
-        ImGui::PushID(static_cast<int>(i));
-        char label[32];
-        snprintf(label, sizeof label, "Preset %zu", i + 1);
-        RowLabel(label);
-        const float bw = EqualWidth(3);
-        ImGui::BeginDisabled(!p.saved);
-        if (ImGui::Button("Go", ImVec2(bw, 0))) worker_.GotoPosition(p.pan, p.tilt, p.zoom);
-        ImGui::EndDisabled();
-        ImGui::SameLine(0, Gap());
-        if (ImGui::Button(p.saved ? "Update" : "Save", ImVec2(bw, 0))) {
+        auto save = [&] {
             p.saved = true;
             p.pan = U(s, UvcCtl::Pan).value;
             p.tilt = U(s, UvcCtl::Tilt).value;
             p.zoom = U(s, UvcCtl::Zoom).value;
             settings_.Save();
             LOG_INFO("Saved preset %zu (pan %ld, tilt %ld, zoom %ld).", i + 1, p.pan, p.tilt, p.zoom);
+        };
+        ImGui::PushID(static_cast<int>(i));
+        if (i) ImGui::SameLine(0, Gap());
+        char label[32];
+        if (p.saved)
+            snprintf(label, sizeof label, "Preset %zu", i + 1);
+        else
+            snprintf(label, sizeof label, "+ Save %zu", i + 1);
+        ImGui::PushStyleColor(ImGuiCol_Text, p.saved ? kText : kTextDim);
+        if (ImGui::Button(label, ImVec2(bw, 0))) {
+            if (p.saved)
+                worker_.GotoPosition(p.pan, p.tilt, p.zoom);
+            else
+                save();
         }
-        ImGui::SameLine(0, Gap());
-        ImGui::BeginDisabled(!p.saved);
-        if (ImGui::Button("Clear", ImVec2(bw, 0))) {
-            p = Preset{};
-            settings_.Save();
+        ImGui::PopStyleColor();
+        if (p.saved) {
+            // A small accent tick on the left edge marks a saved preset.
+            const ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+            const float t = std::max(2.0f, std::round(ImGui::GetFontSize() * 0.15f));
+            const float inset = std::round((mx.y - mn.y) * 0.3f);
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(mn.x + t, mn.y + inset), ImVec2(mn.x + t * 2, mx.y - inset),
+                                                      ImGui::GetColorU32(kAccent), t * 0.5f);
         }
-        ImGui::EndDisabled();
+        ImGui::SetItemTooltip(p.saved ? "Go to this position. Right-click to update or clear."
+                                      : "Save where the camera is pointing now.");
+        if (ImGui::BeginPopupContextItem("##menu")) {
+            if (ImGui::MenuItem(p.saved ? "Update to the current position" : "Save the current position")) save();
+            if (ImGui::MenuItem("Clear", nullptr, false, p.saved)) {
+                p = Preset{};
+                settings_.Save();
+            }
+            ImGui::EndPopup();
+        }
         ImGui::PopID();
     }
     ImGui::EndDisabled();
@@ -818,7 +953,8 @@ void App::DrawPresets(const CameraState& s) {
 
 // ---- Image tab -------------------------------------------------------------------------------
 
-void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn) {
+void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn,
+                    float unitSlot) {
     const UvcInfo& u = U(s, c);
     ImGui::PushID(static_cast<int>(c));
     RowLabel(label, labelWidth);
@@ -830,7 +966,7 @@ void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label, float lab
     ImGui::BeginDisabled(u.isAuto);
     int64_t v = u.value;
     const int64_t min = u.min, max = u.max;
-    if (SliderTrack("##v", ImGuiDataType_S64, &v, &min, &max, "%lld", TrackWidth(autoColumn)))
+    if (SliderTrack("##v", ImGuiDataType_S64, &v, &min, &max, "%lld", TrackWidth(autoColumn, unitSlot)))
         worker_.SetUvc(c, static_cast<long>(v), false);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) worker_.SetUvc(c, u.def, false);
     ImGui::SetItemTooltip("Double-click to reset (default %ld).", u.def);
@@ -926,6 +1062,10 @@ void App::DrawCameraTab(const CameraState& s) {
     ImGui::TextWrapped("Free and open-source software under the MIT Licence. Unofficial: not made by, "
                        "affiliated with or endorsed by OBSBOT.");
     ImGui::TextWrapped("Private by design: works entirely offline, with no accounts, telemetry or internet access.");
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
+    ImGui::TextWrapped("Uses the Chakra Petch font (SIL Open Font Licence 1.1) and Dear ImGui (MIT). Portions of this "
+                       "software are copyright \xC2\xA9 2024 The FreeType Project (www.freetype.org). All rights reserved.");
+    ImGui::PopStyleColor();
     if (ImGui::Button("Open settings folder"))
         ShellExecuteW(nullptr, L"open", Settings::Directory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
