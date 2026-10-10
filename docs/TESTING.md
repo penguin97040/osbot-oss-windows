@@ -2,7 +2,7 @@
 
 Automated tests cover protocol encoding and safety helpers, but every camera feature needs
 a real test on Windows with the OBSBOT plugged in. Run through this list after
-each release. **v0.1.2 real Windows camera verification is pending.**
+each release. **Real Windows camera verification of the redesigned interface is pending.**
 
 ## Before you start
 
@@ -16,14 +16,17 @@ each release. **v0.1.2 real Windows camera verification is pending.**
 
 Tick each box or note what happened.
 
-Some checks use the **Developer** tab. Turn it on with *Camera → Advanced → Show
-developer tools*.
+Some checks use the **Developer** tab. Turn it on with *Camera → Advanced → Developer tab*.
 
 ### Connection and preview
 - [ ] The header shows "OBSBOT Tiny 2 Lite" with a green dot.
-- [ ] The live preview appears. Note the format shown at the top left.
+- [ ] The live preview appears, and the format at the top left reads *1280×720 NV12 30 fps (default)*
+      (or note what it shows).
+- [ ] Click the format: a list of the camera's formats opens, largest first, with the default marked.
+      Pick the largest one: the preview restarts at that size. Pick a few others, then the default again.
+- [ ] Close and reopen the app: the preview starts at the default format again.
 - [ ] Unplug the camera: the header goes red within a few seconds. Plug it back in: it reconnects.
-- [ ] Untick *Camera → Show live preview*: the preview stops promptly and controls still work.
+- [ ] Turn off the *Live preview* switch above the preview: it stops promptly and controls still work.
 - [ ] Toggle the preview off/on several times; each restart shows new frames.
 - [ ] Unplug while previewing, then turn the preview off and close the app: neither action freezes.
 - [ ] Sleep the camera while previewing, then turn the preview off/on and wake it; the app stays responsive.
@@ -34,20 +37,21 @@ developer tools*.
 - [ ] *Normal* starts tracking you. The button stays highlighted.
 - [ ] *Upper body*, *Close-up*, *Headless*, *Lower body*: framing changes.
 - [ ] *Group*, *Hand*, *Whiteboard*, *Desk*: note which work.
-- [ ] *Off* stops tracking.
+- [ ] *Tracking off* stops tracking.
 - [ ] *Sport* tracking speed: does the Log say "camera acknowledged"?
 
 ### Gimbal and zoom
 - [ ] *Smooth (vendor)*: hold each arrow; the camera moves and **stops when you let go**.
-- [ ] Is left/right the right way round? If not, tick *Invert left/right* and note it.
-- [ ] Is up/down the right way round? (*Developer → Invert up/down*)
-- [ ] *Steps (UVC)*: hold each arrow; does the camera move?
+- [ ] With both *Invert* switches off, every arrow moves the picture the way it points, in both
+      *Smooth (vendor)* and *Steps (UVC)*. Note any arrow that's still the wrong way round.
+- [ ] *Invert → Horizontal* swaps left and right; *Invert → Vertical* swaps up and down (both methods).
+- [ ] The *Speed* slider is only active for *Smooth (vendor)*.
 - [ ] *Pan*, *Tilt* and *Zoom* sliders move the camera.
 - [ ] *Centre* returns the camera to the middle. What does the Log say?
 - [ ] Release a held arrow while changing tracking speed, FOV or sleep; movement stops promptly.
 - [ ] Switch cameras while holding an arrow; the old camera stops and the new camera does not inherit movement.
 - [ ] Close the app while moving; the camera stops. Unplug during movement, reconnect and confirm it remains stopped.
-- [ ] Ctrl-click the speed slider and type `1000`, then `-10`; the displayed speed stays within 5–90°/s.
+- [ ] Drag the speed slider to both ends; the value beside it stays within 5–90°/s.
 - [ ] Recall a saved preset after changing cameras; positions stay within the selected camera's ranges.
 
 ### Presets
@@ -55,11 +59,12 @@ developer tools*.
 
 ### Image tab
 - [ ] Brightness, contrast, saturation, sharpness change the picture.
-- [ ] White balance, exposure and focus *Auto* checkboxes toggle.
-- [ ] *Reset image to camera defaults* works.
+- [ ] White balance, exposure and focus *Auto* switches toggle, and the slider greys out while on.
+- [ ] Double-click a slider: it returns to the camera's default.
+- [ ] *Reset to defaults* works.
 
 ### Camera tab
-- [ ] *HDR* toggles (the picture changes subtly; the checkbox stays ticked).
+- [ ] *HDR* toggles (the picture changes subtly; the switch stays on).
 - [ ] *Field of view* Wide/Medium/Narrow changes the picture. If the wrong one is
       selected, or nothing happens, try *Developer → Protocol variant → Tiny 2 codes* and note it.
 - [ ] *Anti-flicker* 50 Hz is selected by default.

@@ -39,6 +39,17 @@ int main() {
     CHECK(StepValue(min, min, max, max, -1) == min);
     CHECK(StepValue(0, min, max, 1, 1) == 107374182);
 
+    // Smooth flips vertical, steps flip horizontal; each switch flips once more.
+    for (int dx : {-1, 0, 1})
+        for (int dy : {-1, 0, 1})
+            for (bool h : {false, true})
+                for (bool v : {false, true}) {
+                    const MoveSign smooth = MoveSigns(true, dx, dy, h, v);
+                    const MoveSign steps = MoveSigns(false, dx, dy, h, v);
+                    CHECK(smooth.pan == (h ? -dx : dx) && smooth.tilt == (v ? dy : -dy));
+                    CHECK(steps.pan == (h ? dx : -dx) && steps.tilt == (v ? -dy : dy));
+                }
+    CHECK(MoveSigns(true, 5, -9, false, false).pan == 1 && MoveSigns(true, 5, -9, false, false).tilt == 1);
     CHECK(Geometry(4096, 4096));
     CHECK(!Geometry(4096, 4097) && !Geometry(0, 1) && !Geometry(16385, 1));
     CHECK(FrameBounds(2, 3, 12, 0, 32));

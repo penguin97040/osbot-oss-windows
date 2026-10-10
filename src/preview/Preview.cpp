@@ -6,6 +6,7 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -118,13 +119,17 @@ double ScoreType(IMFMediaType* type) {
 
 Preview::~Preview() { Stop(); }
 
-void Preview::Start(const std::wstring& devicePath) {
+void Preview::Start(const std::wstring& devicePath, const std::string& formatKey) {
     Stop();
-    path_ = devicePath;
     {
         std::lock_guard<std::mutex> lock(frameMutex_);
+        if (devicePath != path_) {
+            formats_.clear();
+            defaultFormatKey_.clear();
+        }
         error_.clear();
         format_.clear();
+        formatKey_.clear();
         frame_.clear();
         frameId_ = 0;
         upload_.uploaded = 0;
@@ -132,10 +137,12 @@ void Preview::Start(const std::wstring& devicePath) {
         srv_.Reset();
         texW_ = texH_ = 0;
     }
+    path_ = devicePath;
+    requestedFormat_ = formatKey;
     stopRequested_ = false;
     running_ = true;
     readState_ = std::make_shared<PreviewReadState>();
-    thread_ = std::thread([this, devicePath, state = readState_] { Run(devicePath, state); });
+    thread_ = std::thread([this, devicePath, formatKey, state = readState_] { Run(devicePath, formatKey, state); });
 }
 
 void Preview::Stop() {
@@ -156,13 +163,28 @@ std::string Preview::Format() {
     return format_;
 }
 
+std::vector<PreviewFormat> Preview::Formats() {
+    std::lock_guard<std::mutex> lock(frameMutex_);
+    return formats_;
+}
+
+std::string Preview::DefaultFormatKey() {
+    std::lock_guard<std::mutex> lock(frameMutex_);
+    return defaultFormatKey_;
+}
+
+std::string Preview::CurrentFormatKey() {
+    std::lock_guard<std::mutex> lock(frameMutex_);
+    return formatKey_;
+}
+
 void Preview::SetError(const std::string& e) {
     LOG_WARN("%s", e.c_str());
     std::lock_guard<std::mutex> lock(frameMutex_);
     error_ = e;
 }
 
-void Preview::Run(std::wstring path, std::shared_ptr<PreviewReadState> state) {
+void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<PreviewReadState> state) {
     const HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hrCom)) {
         SetError(FriendlyError(hrCom));
@@ -219,33 +241,65 @@ void Preview::Run(std::wstring path, std::shared_ptr<PreviewReadState> state) {
         }
 
         const DWORD stream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
-        // Pick the best native format, then ask the reader to convert to RGB32.
+        // List the native formats, use the requested one (or the best for a
+        // preview), then ask the reader to convert to RGB32.
         {
-            ComPtr<IMFMediaType> best;
-            double bestScore = -1e18;
+            struct Native {
+                PreviewFormat format;
+                ComPtr<IMFMediaType> type;
+                double score;
+            };
+            std::vector<Native> natives;
             for (DWORD i = 0;; ++i) {
                 ComPtr<IMFMediaType> t;
                 if (FAILED(reader->GetNativeMediaType(stream, i, t.GetAddressOf()))) break;
-                double s = ScoreType(t.Get());
-                if (s > bestScore) {
-                    bestScore = s;
-                    best = t;
-                }
+                PreviewFormat f;
+                GUID sub{};
+                MFGetAttributeSize(t.Get(), MF_MT_FRAME_SIZE, &f.width, &f.height);
+                MFGetAttributeRatio(t.Get(), MF_MT_FRAME_RATE, &f.fpsNum, &f.fpsDen);
+                t->GetGUID(MF_MT_SUBTYPE, &sub);
+                // H.264 needs a decoder that may not be present; the camera offers
+                // the same sizes uncompressed or as MJPG anyway.
+                if (sub == MFVideoFormat_H264 || !safety::Geometry(f.width, f.height)) continue;
+                f.fourcc = FourCc(sub);
+                const std::string key = f.Key();
+                if (std::any_of(natives.begin(), natives.end(), [&](const Native& n) { return n.format.Key() == key; }))
+                    continue;
+                natives.push_back({f, t, ScoreType(t.Get())});
             }
-            if (best) {
-                const HRESULT hr = reader->SetCurrentMediaType(stream, nullptr, best.Get());
-                if (FAILED(hr)) { SetError(FriendlyError(hr)); return; }
+            const Native* best = nullptr;
+            for (const Native& n : natives)
+                if (!best || n.score > best->score) best = &n;
+            const Native* chosen = best;
+            if (best && !formatKey.empty()) {
+                auto it = std::find_if(natives.begin(), natives.end(),
+                                       [&](const Native& n) { return n.format.Key() == formatKey; });
+                if (it != natives.end())
+                    chosen = &*it;
+                else
+                    LOG_WARN("Preview: the chosen format isn't offered by this camera; using the default.");
+            }
+            std::vector<PreviewFormat> list;
+            for (const Native& n : natives) list.push_back(n.format);
+            std::stable_sort(list.begin(), list.end(), [](const PreviewFormat& a, const PreviewFormat& b) {
+                const uint64_t pa = static_cast<uint64_t>(a.width) * a.height;
+                const uint64_t pb = static_cast<uint64_t>(b.width) * b.height;
+                if (pa != pb) return pa > pb;
+                return a.Fps() > b.Fps();
+            });
+            {
+                std::lock_guard<std::mutex> lock(frameMutex_);
+                formats_ = std::move(list);
+                defaultFormatKey_ = best ? best->format.Key() : std::string();
             }
 
-            UINT32 w = 0, h = 0, num = 0, den = 1;
-            GUID sub{};
-            if (best) {
-                MFGetAttributeSize(best.Get(), MF_MT_FRAME_SIZE, &w, &h);
-                MFGetAttributeRatio(best.Get(), MF_MT_FRAME_RATE, &num, &den);
-                best->GetGUID(MF_MT_SUBTYPE, &sub);
+            HRESULT hr = chosen ? reader->SetCurrentMediaType(stream, nullptr, chosen->type.Get()) : S_OK;
+            if (FAILED(hr)) {
+                SetError(FriendlyError(hr));
+                return;
             }
             ComPtr<IMFMediaType> rgb;
-            HRESULT hr = MFCreateMediaType(rgb.GetAddressOf());
+            if (SUCCEEDED(hr)) hr = MFCreateMediaType(rgb.GetAddressOf());
             if (SUCCEEDED(hr)) hr = rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
             if (SUCCEEDED(hr)) hr = rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
             if (SUCCEEDED(hr)) hr = reader->SetCurrentMediaType(stream, nullptr, rgb.Get());
@@ -253,11 +307,9 @@ void Preview::Run(std::wstring path, std::shared_ptr<PreviewReadState> state) {
                 SetError(FriendlyError(hr));
                 return;
             }
-            char fmt[96];
-            snprintf(fmt, sizeof fmt, "%u\xC3\x97%u %s %.0f fps", w, h, FourCc(sub).c_str(),
-                     den ? static_cast<double>(num) / den : 0.0);
             std::lock_guard<std::mutex> lock(frameMutex_);
-            format_ = fmt;
+            format_ = chosen ? chosen->format.Label() : std::string("Camera default format");
+            formatKey_ = chosen ? chosen->format.Key() : std::string();
         }
 
         // Frame geometry of the RGB32 output. Re-read whenever the reader reports a

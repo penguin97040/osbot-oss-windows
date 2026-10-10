@@ -18,8 +18,8 @@ struct Settings {
     int variant = 0;        // VariantSetting: 0 auto, 1 Tiny 2, 2 Lite
     int moveMethod = 0;     // MoveMethod
     float moveSpeed = 30.0f;  // degrees per second for hold-to-move
-    bool invertPan = false;
-    bool invertTilt = false;
+    bool invertHorizontal = false;  // on top of each movement method's own direction
+    bool invertVertical = false;
     bool showDeveloper = false;
     std::array<Preset, 3> presets{};
     std::wstring devicePath;  // last camera used

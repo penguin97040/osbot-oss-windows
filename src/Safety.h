@@ -44,6 +44,18 @@ inline int32_t StepValue(int32_t value, int32_t min, int32_t max, int32_t step, 
     return static_cast<int32_t>(std::clamp<int64_t>(target, min, max));
 }
 
+// Hold-to-move directions for the arrow pad (dx: +1 right, dy: +1 up). On the
+// Tiny 2 Lite the vendor speed command moves up/down the opposite way to the
+// UVC pan/tilt steps, and the steps move left/right the opposite way, so each
+// method flips one axis by default. The user's invert switches apply on top.
+struct MoveSign { int pan = 0, tilt = 0; };
+inline MoveSign MoveSigns(bool smooth, int dx, int dy, bool invertHorizontal, bool invertVertical) {
+    const int x = std::clamp(dx, -1, 1), y = std::clamp(dy, -1, 1);
+    const bool flipX = invertHorizontal != !smooth;
+    const bool flipY = invertVertical != smooth;
+    return {flipX ? -x : x, flipY ? -y : y};
+}
+
 inline bool Geometry(uint32_t width, uint32_t height) {
     return width && height && width <= 16384 && height <= 16384 &&
            static_cast<uint64_t>(width) * height * 4 <= kPreviewLimit;

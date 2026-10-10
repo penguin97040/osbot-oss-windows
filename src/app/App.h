@@ -28,6 +28,7 @@ public:
 private:
     void ManagePreview(const CameraState& s);
     void DrawHeader(const CameraState& s);
+    void DrawPreviewToolbar(const CameraState& s);
     void DrawPreview(const CameraState& s, float width, float height);
     void DrawControlTab(const CameraState& s);
     void DrawImageTab(const CameraState& s);
@@ -37,7 +38,7 @@ private:
     void DrawAiTracking(const CameraState& s);
     void DrawGimbal(const CameraState& s);
     void DrawPresets(const CameraState& s);
-    void UvcSlider(const CameraState& s, UvcCtl c, const char* label);
+    void UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn);
     std::string Diagnostics(const CameraState& s);
 
     HWND hwnd_ = nullptr;
@@ -48,6 +49,8 @@ private:
     CameraWorker worker_;
     Preview preview_;
     std::wstring previewAttemptPath_;  // stops a failed preview restarting every frame
+    std::string previewFormatKey_;     // chosen preview format; empty = default. Not saved,
+    std::wstring previewFormatDevice_; // so the app always opens at the default format.
     bool previewActive_ = false;
     bool holding_ = false;
     std::chrono::steady_clock::time_point lastStep_{};

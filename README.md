@@ -22,11 +22,11 @@ Inspired by [obsbot4linux](https://github.com/vampyren/obsbot4linux), which does
 | Area | Controls |
 |---|---|
 | AI tracking | Off, Normal, Upper body, Close-up, Headless, Lower body, Group, Hand, Whiteboard, Desk; Standard/Sport speed |
-| Gimbal | Hold-to-move arrows (smooth or stepped), Centre, pan/tilt sliders, 3 presets |
+| Gimbal | Hold-to-move arrows (smooth or stepped, with invert switches), Centre, pan/tilt sliders, 3 presets |
 | Zoom | Zoom slider |
 | Picture | Brightness, contrast, saturation, sharpness, hue, gamma, white balance, exposure, gain, backlight, focus (with Auto where supported) |
 | Camera | HDR, field of view (wide/medium/narrow), anti-flicker (50 Hz default for NZ), sleep/wake |
-| Other | Live preview (can be turned off), activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
+| Other | Live preview with a format picker (can be turned off), activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
 
 ## Download and run
 
@@ -40,7 +40,7 @@ Requirements: Windows 10 or 11, 64-bit. Windows "N" editions need the free
 
 Tips:
 - Only one app can use the camera's **video** at a time. To use Teams, Zoom or OBS
-  while this app is open, untick *Camera → Show live preview*. The controls keep working.
+  while this app is open, turn off the *Live preview* switch above the preview. The controls keep working.
 - Settings and the log live in `%APPDATA%\osbot-oss-windows\`. Delete that folder to reset.
 
 ## Status

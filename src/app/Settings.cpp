@@ -85,8 +85,10 @@ void Settings::Load() {
     variant = getInt("protocol_variant", variant);
     moveMethod = getInt("move_method", moveMethod);
     moveSpeed = getFloat("move_speed", moveSpeed);
-    invertPan = getBool("invert_pan", invertPan);
-    invertTilt = getBool("invert_tilt", invertTilt);
+    // The older invert_pan/invert_tilt keys are deliberately not read: the default
+    // directions changed with the rename, so carrying them over could flip an axis twice.
+    invertHorizontal = getBool("invert_horizontal", invertHorizontal);
+    invertVertical = getBool("invert_vertical", invertVertical);
     showDeveloper = getBool("show_developer", showDeveloper);
     // A hand-edited or damaged file must not produce out-of-range values (the
     // move speed goes straight to the gimbal). Fall back to the defaults.
@@ -120,8 +122,8 @@ void Settings::Save() const {
     fprintf(f, "protocol_variant=%d\r\n", variant);
     fprintf(f, "move_method=%d\r\n", moveMethod);
     fprintf(f, "move_speed=%.1f\r\n", moveSpeed);
-    fprintf(f, "invert_pan=%d\r\n", invertPan ? 1 : 0);
-    fprintf(f, "invert_tilt=%d\r\n", invertTilt ? 1 : 0);
+    fprintf(f, "invert_horizontal=%d\r\n", invertHorizontal ? 1 : 0);
+    fprintf(f, "invert_vertical=%d\r\n", invertVertical ? 1 : 0);
     fprintf(f, "show_developer=%d\r\n", showDeveloper ? 1 : 0);
     fprintf(f, "window_w=%d\r\n", windowW);
     fprintf(f, "window_h=%d\r\n", windowH);

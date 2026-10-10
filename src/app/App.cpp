@@ -18,6 +18,8 @@ using obsbot::Fov;
 namespace {
 
 // ---- Palette (dark) -------------------------------------------------------------
+// One accent colour marks everything that is on, selected or active. Green, amber
+// and red are kept for status only (connection pill, log levels, warnings).
 const ImVec4 kBg = ImVec4(0.059f, 0.067f, 0.082f, 1.0f);         // #0F1115
 const ImVec4 kPanel = ImVec4(0.086f, 0.102f, 0.125f, 1.0f);      // #161A20
 const ImVec4 kFrame = ImVec4(0.137f, 0.157f, 0.196f, 1.0f);      // #232832
@@ -27,23 +29,44 @@ const ImVec4 kBorder = ImVec4(0.180f, 0.204f, 0.243f, 1.0f);     // #2E343E
 const ImVec4 kText = ImVec4(0.902f, 0.910f, 0.922f, 1.0f);       // #E6E8EB
 const ImVec4 kTextDim = ImVec4(0.545f, 0.576f, 0.631f, 1.0f);    // #8B93A1
 const ImVec4 kAccent = ImVec4(0.310f, 0.549f, 1.0f, 1.0f);       // #4F8CFF
-const ImVec4 kAccentHover = ImVec4(0.416f, 0.620f, 1.0f, 1.0f);
+const ImVec4 kAccentHover = ImVec4(0.416f, 0.620f, 1.0f, 1.0f);  // #6A9EFF
 const ImVec4 kAccentDim = ImVec4(0.310f, 0.549f, 1.0f, 0.35f);
+const ImVec4 kWhite = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 const ImVec4 kGood = ImVec4(0.298f, 0.788f, 0.486f, 1.0f);
 const ImVec4 kWarn = ImVec4(0.961f, 0.722f, 0.259f, 1.0f);
 const ImVec4 kBad = ImVec4(0.937f, 0.353f, 0.353f, 1.0f);
 
 const UvcInfo& U(const CameraState& s, UvcCtl c) { return s.uvc[static_cast<size_t>(c)]; }
 
-void HelpMarker(const char* text) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
+// ---- Layout grid ------------------------------------------------------------------
+// Every control row uses the same columns so things line up across sections:
+//   label | control (stretches) | value (right-aligned) | trailing (Auto switch)
+float LabelWidth() { return ImGui::GetFontSize() * 8.0f; }
+float CompactLabelWidth() { return ImGui::GetFontSize() * 3.0f; }
+float ValueWidth() { return ImGui::GetFontSize() * 3.6f; }
+float Gap() { return ImGui::GetStyle().ItemSpacing.x; }
+float SwitchHeight() { return std::round(ImGui::GetFontSize() * 1.05f); }
+float SwitchWidth() { return std::round(SwitchHeight() * 1.8f); }
+float TrailWidth() { return SwitchWidth() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Auto").x; }
+
+// Width of each of n buttons that share the rest of the row equally.
+float EqualWidth(int n) {
+    return std::floor((ImGui::GetContentRegionAvail().x - Gap() * static_cast<float>(n - 1)) / static_cast<float>(n));
+}
+
+void Tooltip(const char* text) {
     if (ImGui::BeginItemTooltip()) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
         ImGui::TextUnformatted(text);
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+}
+
+void HelpMarker(const char* text) {
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextDisabled("(?)");
+    Tooltip(text);
 }
 
 void SectionTitle(const char* text) {
@@ -55,16 +78,168 @@ void SectionTitle(const char* text) {
     ImGui::Spacing();
 }
 
+// Starts a row: the label in a column labelWidth wide (with an optional help
+// marker), leaving the cursor where the control goes. A label too long for its
+// column pushes the control along rather than overlapping it.
+void RowLabel(const char* label, float labelWidth, const char* help = nullptr) {
+    const float x0 = ImGui::GetCursorScreenPos().x;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (help) HelpMarker(help);
+    ImGui::SameLine(0, 0);
+    const ImVec2 cur = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(ImVec2(std::max(cur.x + Gap(), x0 + labelWidth), cur.y));
+}
+void RowLabel(const char* label, const char* help = nullptr) { RowLabel(label, LabelWidth(), help); }
+
+// A value shown beside its slider, right-aligned in the value column.
+void ValueText(const char* text) {
+    ImGui::SameLine(0, Gap());
+    const float x = ImGui::GetCursorPosX();
+    ImGui::SetCursorPosX(x + std::max(0.0f, ValueWidth() - ImGui::CalcTextSize(text).x));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(text);
+}
+
+// Width left for a slider track once the value (and optional trailing) column is reserved.
+float TrackWidth(bool trailColumn) {
+    return std::max(ImGui::GetFontSize() * 3.0f,
+                    ImGui::GetContentRegionAvail().x - Gap() - ValueWidth() - (trailColumn ? Gap() + TrailWidth() : 0.0f));
+}
+
+// A slim slider: a thin rounded track, accent fill and a round grab. The value is
+// drawn by the caller beside it (ValueText), never inside the track.
+bool SliderTrack(const char* id, ImGuiDataType type, void* value, const void* min, const void* max,
+                 const char* format, float width) {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems) return false;
+    ImGuiContext& g = *GImGui;
+    const ImGuiStyle& style = g.Style;
+    const ImGuiID gid = window->GetID(id);
+    const ImVec2 pos = window->DC.CursorPos;
+    const ImRect bb(pos, ImVec2(pos.x + width, pos.y + ImGui::GetFrameHeight()));
+    ImGui::ItemSize(bb, style.FramePadding.y);
+    if (!ImGui::ItemAdd(bb, gid)) return false;
+
+    const bool hovered = ImGui::ItemHoverable(bb, gid, g.LastItemData.ItemFlags);
+    const bool clicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left, ImGuiInputFlags_None, gid);
+    if (clicked || g.NavActivateId == gid) {
+        if (clicked) ImGui::SetKeyOwner(ImGuiKey_MouseLeft, gid);
+        ImGui::SetActiveID(gid, window);
+        ImGui::SetFocusID(gid, window);
+        ImGui::FocusWindow(window);
+        g.ActiveIdUsingNavDirMask |= (1 << ImGuiDir_Left) | (1 << ImGuiDir_Right);
+    }
+
+    ImRect grab;
+    const bool changed = ImGui::SliderBehavior(bb, gid, type, value, min, max, format,
+                                               ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput, &grab);
+    if (changed) ImGui::MarkItemEdited(gid);
+
+    const bool active = g.ActiveId == gid;
+    const float cy = std::round((bb.Min.y + bb.Max.y) * 0.5f);
+    const float track = std::max(2.0f, std::round(ImGui::GetFontSize() * 0.24f));
+    const float radius = style.GrabMinSize * 0.62f * (hovered || active ? 1.15f : 1.0f);
+    const float x0 = bb.Min.x + 2.0f + style.GrabMinSize * 0.5f;
+    const float x1 = bb.Max.x - 2.0f - style.GrabMinSize * 0.5f;
+    const float gx = grab.Max.x > grab.Min.x ? std::clamp((grab.Min.x + grab.Max.x) * 0.5f, x0, x1) : x0;
+
+    ImDrawList* dl = window->DrawList;
+    ImGui::RenderNavCursor(bb, gid);
+    dl->AddRectFilled(ImVec2(x0, cy - track * 0.5f), ImVec2(x1, cy + track * 0.5f),
+                      ImGui::GetColorU32(hovered || active ? kFrameActive : kFrameHover), track * 0.5f);
+    dl->AddRectFilled(ImVec2(x0, cy - track * 0.5f), ImVec2(gx, cy + track * 0.5f),
+                      ImGui::GetColorU32(active ? kAccentHover : kAccent), track * 0.5f);
+    dl->AddCircleFilled(ImVec2(gx, cy), radius, ImGui::GetColorU32(kText));
+    dl->AddCircle(ImVec2(gx, cy), radius, ImGui::GetColorU32(active ? kAccentHover : kAccent), 0, 2.0f);
+    return changed;
+}
+
+// An on/off switch with its label to the right. Returns true when flipped.
+bool ToggleSwitch(const char* label, bool* v) {
+    const char* end = ImGui::FindRenderedTextEnd(label);
+    const float textW = label == end ? 0.0f : ImGui::CalcTextSize(label, end).x;
+    const float sh = SwitchHeight(), sw = SwitchWidth();
+    const float h = ImGui::GetFrameHeight();
+    const float w = sw + (textW > 0 ? ImGui::GetStyle().ItemInnerSpacing.x + textW : 0.0f);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton(label, ImVec2(w, h));
+    if (pressed) *v = !*v;
+    const bool hovered = ImGui::IsItemHovered();
+    ImGui::RenderNavCursor(ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()), ImGui::GetItemID());
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float top = std::round(p.y + (h - sh) * 0.5f);
+    const ImVec2 a(p.x, top), b(p.x + sw, top + sh);
+    if (*v) {
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), sh * 0.5f);
+    } else {
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kFrameActive : kFrameHover), sh * 0.5f);
+        dl->AddRect(a, b, ImGui::GetColorU32(kBorder), sh * 0.5f);
+    }
+    const float r = sh * 0.5f - std::max(2.0f, sh * 0.14f);
+    const float cx = *v ? b.x - sh * 0.5f : a.x + sh * 0.5f;
+    dl->AddCircleFilled(ImVec2(cx, top + sh * 0.5f), r, ImGui::GetColorU32(*v ? kWhite : kText));
+    if (textW > 0)
+        dl->AddText(ImVec2(b.x + ImGui::GetStyle().ItemInnerSpacing.x, p.y + ImGui::GetStyle().FramePadding.y),
+                    ImGui::GetColorU32(ImGuiCol_Text), label, end);
+    return pressed;
+}
+
+// Joined, equal-width choices with the selected one in the accent colour.
+// Returns the index that was clicked, or -1.
+int Segmented(const char* id, const char* const* labels, int count, int selected,
+              const char* const* tooltips = nullptr) {
+    ImGui::PushID(id);
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float h = ImGui::GetFrameHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float rounding = ImGui::GetStyle().FrameRounding;
+    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), ImGui::GetColorU32(kFrame), rounding);
+    dl->AddRect(p, ImVec2(p.x + width, p.y + h), ImGui::GetColorU32(kBorder), rounding);
+
+    int clicked = -1;
+    const float inset = std::max(2.0f, std::round(ImGui::GetFontSize() * 0.15f));
+    for (int i = 0; i < count; ++i) {
+        const float xa = std::round(p.x + width * static_cast<float>(i) / static_cast<float>(count));
+        const float xb = std::round(p.x + width * static_cast<float>(i + 1) / static_cast<float>(count));
+        ImGui::SetCursorScreenPos(ImVec2(xa, p.y));
+        ImGui::PushID(i);
+        if (ImGui::InvisibleButton("##seg", ImVec2(xb - xa, h))) clicked = i;
+        ImGui::PopID();
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::RenderNavCursor(ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()), ImGui::GetItemID());
+        if (tooltips && tooltips[i]) Tooltip(tooltips[i]);
+        const ImVec2 a(xa + inset, p.y + inset), b(xb - inset, p.y + h - inset);
+        if (i == selected)
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(hovered ? kAccentHover : kAccent), rounding - inset * 0.5f);
+        else if (hovered)
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(kFrameHover), rounding - inset * 0.5f);
+        const ImVec2 ts = ImGui::CalcTextSize(labels[i]);
+        dl->PushClipRect(ImVec2(xa, p.y), ImVec2(xb, p.y + h), true);
+        dl->AddText(ImVec2(std::round((xa + xb - ts.x) * 0.5f), std::round(p.y + (h - ts.y) * 0.5f)),
+                    ImGui::GetColorU32(i == selected ? kWhite : kText), labels[i]);
+        dl->PopClipRect();
+    }
+    // Leave the cursor on the next line, as a normal full-width item would.
+    ImGui::SetCursorScreenPos(p);
+    ImGui::Dummy(ImVec2(width, h));
+    ImGui::PopID();
+    return clicked;
+}
+
 // A button that looks "on" when selected.
 bool ToggleButton(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
     if (selected) {
         ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccentHover);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccent);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+        ImGui::PushStyleColor(ImGuiCol_Border, kAccent);
+        ImGui::PushStyleColor(ImGuiCol_Text, kWhite);
     }
     bool pressed = ImGui::Button(label, size);
-    if (selected) ImGui::PopStyleColor(4);
+    if (selected) ImGui::PopStyleColor(5);
     return pressed;
 }
 
@@ -93,7 +268,7 @@ bool ArrowPadButton(const char* id, ImGuiDir dir, float size) {
     ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
     float r = size * 0.18f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImU32 col = ImGui::GetColorU32(held ? ImVec4(1, 1, 1, 1) : kText);
+    ImU32 col = ImGui::GetColorU32(held ? kAccentHover : kText);
     switch (dir) {
     case ImGuiDir_Up: dl->AddTriangleFilled(ImVec2(c.x, c.y - r), ImVec2(c.x + r, c.y + r * 0.6f), ImVec2(c.x - r, c.y + r * 0.6f), col); break;
     case ImGuiDir_Down: dl->AddTriangleFilled(ImVec2(c.x - r, c.y - r * 0.6f), ImVec2(c.x + r, c.y - r * 0.6f), ImVec2(c.x, c.y + r), col); break;
@@ -152,6 +327,7 @@ void App::ApplyTheme(float dpiScale) {
     style.ScrollbarRounding = 6.0f;
     style.WindowBorderSize = 0.0f;
     style.ChildBorderSize = 1.0f;
+    style.PopupBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
     style.WindowPadding = ImVec2(12, 12);
     style.FramePadding = ImVec2(10, 6);
@@ -159,7 +335,9 @@ void App::ApplyTheme(float dpiScale) {
     style.ItemInnerSpacing = ImVec2(6, 6);
     style.GrabMinSize = 12.0f;
     style.ScrollbarSize = 12.0f;
+    style.SeparatorTextBorderSize = 1.0f;
 
+    // Set every colour from the palette, so none of Dear ImGui's stock blue shows.
     ImVec4* c = style.Colors;
     c[ImGuiCol_Text] = kText;
     c[ImGuiCol_TextDisabled] = kTextDim;
@@ -167,11 +345,13 @@ void App::ApplyTheme(float dpiScale) {
     c[ImGuiCol_ChildBg] = kPanel;
     c[ImGuiCol_PopupBg] = kPanel;
     c[ImGuiCol_Border] = kBorder;
+    c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_FrameBg] = kFrame;
     c[ImGuiCol_FrameBgHovered] = kFrameHover;
     c[ImGuiCol_FrameBgActive] = kFrameActive;
     c[ImGuiCol_TitleBg] = kBg;
     c[ImGuiCol_TitleBgActive] = kBg;
+    c[ImGuiCol_TitleBgCollapsed] = kBg;
     c[ImGuiCol_MenuBarBg] = kPanel;
     c[ImGuiCol_ScrollbarBg] = kPanel;
     c[ImGuiCol_ScrollbarGrab] = kFrameHover;
@@ -187,14 +367,38 @@ void App::ApplyTheme(float dpiScale) {
     c[ImGuiCol_HeaderHovered] = kFrameHover;
     c[ImGuiCol_HeaderActive] = kFrameActive;
     c[ImGuiCol_Separator] = kBorder;
+    c[ImGuiCol_SeparatorHovered] = kFrameActive;
+    c[ImGuiCol_SeparatorActive] = kAccent;
+    c[ImGuiCol_ResizeGrip] = kFrame;
+    c[ImGuiCol_ResizeGripHovered] = kFrameActive;
+    c[ImGuiCol_ResizeGripActive] = kAccent;
+    c[ImGuiCol_InputTextCursor] = kText;
     c[ImGuiCol_Tab] = kPanel;
     c[ImGuiCol_TabHovered] = kFrameHover;
     c[ImGuiCol_TabSelected] = kFrame;
     c[ImGuiCol_TabSelectedOverline] = kAccent;
     c[ImGuiCol_TabDimmed] = kPanel;
     c[ImGuiCol_TabDimmedSelected] = kFrame;
+    c[ImGuiCol_TabDimmedSelectedOverline] = kBorder;
+    c[ImGuiCol_PlotLines] = kTextDim;
+    c[ImGuiCol_PlotLinesHovered] = kAccent;
+    c[ImGuiCol_PlotHistogram] = kAccent;
+    c[ImGuiCol_PlotHistogramHovered] = kAccentHover;
+    c[ImGuiCol_TableHeaderBg] = kFrame;
+    c[ImGuiCol_TableBorderStrong] = kBorder;
+    c[ImGuiCol_TableBorderLight] = kBorder;
+    c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.03f);
+    c[ImGuiCol_TextLink] = kAccent;
     c[ImGuiCol_TextSelectedBg] = kAccentDim;
+    c[ImGuiCol_TreeLines] = kBorder;
+    c[ImGuiCol_DragDropTarget] = kAccent;
+    c[ImGuiCol_DragDropTargetBg] = kAccentDim;
+    c[ImGuiCol_UnsavedMarker] = kText;
     c[ImGuiCol_NavCursor] = kAccent;
+    c[ImGuiCol_NavWindowingHighlight] = kAccent;
+    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0, 0, 0, 0.5f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.5f);
 
     style.FontSizeBase = 17.0f;
     style.ScaleAllSizes(dpiScale);
@@ -228,10 +432,16 @@ void App::ManagePreview(const CameraState& s) {
         previewAttemptPath_.clear();
         return;
     }
-    if (preview_.Running() && preview_.DevicePath() == s.device.path) return;
-    if (!preview_.Running() && previewAttemptPath_ == s.device.path) return;  // failed: wait for Retry
+    // A different camera starts again at its default format.
+    if (s.device.path != previewFormatDevice_) {
+        previewFormatDevice_ = s.device.path;
+        previewFormatKey_.clear();
+    }
+    const bool sameRequest = preview_.DevicePath() == s.device.path && preview_.RequestedFormat() == previewFormatKey_;
+    if (preview_.Running() && sameRequest) return;
+    if (!preview_.Running() && sameRequest && previewAttemptPath_ == s.device.path) return;  // failed: wait for Retry
     previewAttemptPath_ = s.device.path;
-    preview_.Start(s.device.path);
+    preview_.Start(s.device.path, previewFormatKey_);
 }
 
 void App::Frame() {
@@ -249,11 +459,13 @@ void App::Frame() {
 
     DrawHeader(s);
 
-    const float panelW = std::min(430.0f * ImGui::GetStyle().FontScaleDpi, ImGui::GetContentRegionAvail().x * 0.55f);
+    const float panelW = std::min(460.0f * ImGui::GetStyle().FontScaleDpi, ImGui::GetContentRegionAvail().x * 0.55f);
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float previewW = avail.x - panelW - ImGui::GetStyle().ItemSpacing.x;
 
-    ImGui::BeginChild("##preview", ImVec2(previewW, avail.y), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("##preview", ImVec2(previewW, avail.y), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    DrawPreviewToolbar(s);
     DrawPreview(s, ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
     ImGui::EndChild();
 
@@ -290,12 +502,15 @@ void App::DrawHeader(const CameraState& s) {
 
     if (s.connected) {
         const char* label = s.status.valid && s.status.asleep ? "Wake camera" : "Sleep camera";
-        float w = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2;
-        if (s.available.size() > 1) w += 260.0f * ImGui::GetStyle().FontScaleDpi + ImGui::GetStyle().ItemSpacing.x;
+        const float comboW = 260.0f * ImGui::GetStyle().FontScaleDpi;
+        const float buttonW = std::max(ImGui::CalcTextSize("Sleep camera").x, ImGui::CalcTextSize("Wake camera").x) +
+                              ImGui::GetStyle().FramePadding.x * 2;
+        float w = buttonW;
+        if (s.available.size() > 1) w += comboW + Gap();
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
         if (s.available.size() > 1) {
-            ImGui::SetNextItemWidth(260.0f * ImGui::GetStyle().FontScaleDpi);
+            ImGui::SetNextItemWidth(comboW);
             if (ImGui::BeginCombo("##device", s.device.name.c_str())) {
                 for (const auto& d : s.available) {
                     bool sel = d.path == s.device.path;
@@ -310,22 +525,65 @@ void App::DrawHeader(const CameraState& s) {
             ImGui::SameLine();
         }
         ImGui::BeginDisabled(!s.xu);
-        if (ImGui::Button(label)) worker_.SetSleep(!(s.status.valid && s.status.asleep));
+        if (ImGui::Button(label, ImVec2(buttonW, 0))) worker_.SetSleep(!(s.status.valid && s.status.asleep));
         ImGui::EndDisabled();
     }
     ImGui::Spacing();
+}
+
+// The strip above the video: the capture format on the left, the preview switch on the right.
+void App::DrawPreviewToolbar(const CameraState& s) {
+    const std::vector<PreviewFormat> formats = preview_.Formats();
+    const bool showFormats = s.connected && settings_.previewEnabled && !formats.empty();
+    if (showFormats) {
+        const std::string defaultKey = preview_.DefaultFormatKey();
+        const std::string currentKey = preview_.CurrentFormatKey();
+        std::string shown = preview_.Format();
+        if (shown.empty()) {
+            const std::string& wanted = previewFormatKey_.empty() ? defaultKey : previewFormatKey_;
+            for (const auto& f : formats)
+                if (f.Key() == wanted) shown = f.Label();
+        }
+        if (ImGui::BeginCombo("##format", shown.empty() ? "Format" : shown.c_str(),
+                              ImGuiComboFlags_WidthFitPreview | ImGuiComboFlags_HeightLarge)) {
+            for (const auto& f : formats) {
+                const std::string key = f.Key();
+                std::string item = f.Label();
+                if (key == defaultKey) item += "  (default)";
+                item += "##" + key;
+                if (ImGui::Selectable(item.c_str(), key == currentKey)) {
+                    previewFormatKey_ = key == defaultKey ? std::string() : key;
+                    previewAttemptPath_.clear();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Preview resolution and frame rate. Larger sizes use more processor time.");
+        ImGui::SameLine();
+    } else {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("Preview");
+        ImGui::SameLine();
+    }
+
+    const char* label = "Live preview";
+    const float w = SwitchWidth() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
+    if (ToggleSwitch(label, &settings_.previewEnabled)) settings_.Save();
+    Tooltip("Turn this off if you want another app (Teams, Zoom, OBS) to use the camera while this window "
+            "is open. Controls keep working without the preview.");
 }
 
 void App::DrawPreview(const CameraState& s, float width, float height) {
     int texW = 0, texH = 0;
     ID3D11ShaderResourceView* srv = preview_.Running() ? preview_.Update(device_, ctx_, &texW, &texH) : nullptr;
     previewActive_ = preview_.Running();
+    const ImVec2 start = ImGui::GetCursorPos();
 
     auto centredText = [&](const char* text, const ImVec4& colour) {
         const float wrap = width * 0.8f;
         ImVec2 sz = ImGui::CalcTextSize(text, nullptr, false, wrap);
-        ImGui::SetCursorPos(ImVec2((width - sz.x) * 0.5f + ImGui::GetStyle().WindowPadding.x,
-                                   (height - sz.y) * 0.5f));
+        ImGui::SetCursorPos(ImVec2(start.x + (width - sz.x) * 0.5f, start.y + (height - sz.y) * 0.5f));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
         ImGui::PushStyleColor(ImGuiCol_Text, colour);
         ImGui::TextUnformatted(text);
@@ -336,24 +594,25 @@ void App::DrawPreview(const CameraState& s, float width, float height) {
     if (srv && texW > 0 && texH > 0) {
         const float scale = std::min(width / texW, height / texH);
         const ImVec2 size(texW * scale, texH * scale);
-        const ImVec2 start = ImGui::GetCursorPos();
         ImGui::SetCursorPos(ImVec2(start.x + (width - size.x) * 0.5f, start.y + (height - size.y) * 0.5f));
         ImGui::Image(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(srv))), size);
-        ImGui::SetCursorPos(ImVec2(start.x + 4, start.y + 2));
-        ImGui::TextDisabled("%s", preview_.Format().c_str());
         return;
     }
 
     if (!s.connected) {
         centredText("Waiting for an OBSBOT camera...", kTextDim);
     } else if (!settings_.previewEnabled) {
-        centredText("Preview is off. Turn it on from the Camera tab.", kTextDim);
+        centredText("Preview is off.", kTextDim);
     } else if (std::string err = preview_.Error(); !err.empty()) {
         centredText(err.c_str(), kWarn);
         const char* retry = "Retry preview";
         const float bw = ImGui::CalcTextSize(retry).x + ImGui::GetStyle().FramePadding.x * 2;
-        ImGui::SetCursorPosX((width - bw) * 0.5f + ImGui::GetStyle().WindowPadding.x);
-        if (ImGui::Button(retry)) previewAttemptPath_.clear();
+        ImGui::SetCursorPosX(start.x + (width - bw) * 0.5f);
+        if (ImGui::Button(retry)) {
+            // Go back to the default format in case the chosen one was the problem.
+            previewFormatKey_.clear();
+            previewAttemptPath_.clear();
+        }
     } else {
         centredText("Starting preview...", kTextDim);
     }
@@ -373,27 +632,26 @@ void App::DrawAiTracking(const CameraState& s) {
     SectionTitle("AI TRACKING");
     ImGui::BeginDisabled(!s.xu);
     const AiMode current = s.status.aiModeKnown ? s.status.aiMode : AiMode::Count;
-    const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const float bw = (ImGui::GetContentRegionAvail().x - spacing * 2) / 3.0f;
 
-    if (ToggleButton("Off", current == AiMode::Off, ImVec2(bw, 0))) worker_.SetAiMode(AiMode::Off);
-    ImGui::SameLine(0, spacing * 2);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("Speed");
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Standard", !s.status.sportTracking)) worker_.SetSportTracking(false);
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Sport", s.status.sportTracking)) worker_.SetSportTracking(true);
-
+    if (ToggleButton("Tracking off", current == AiMode::Off, ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+        worker_.SetAiMode(AiMode::Off);
     const AiMode modes[] = {AiMode::Normal, AiMode::UpperBody, AiMode::CloseUp,    AiMode::Headless, AiMode::LowerBody,
                             AiMode::Group,  AiMode::Hand,      AiMode::Whiteboard, AiMode::Desk};
+    const float bw = EqualWidth(3);
     for (int i = 0; i < IM_ARRAYSIZE(modes); ++i) {
         const AiMode m = modes[i];
-        if (i % 3) ImGui::SameLine();
+        if (i % 3) ImGui::SameLine(0, Gap());
         const char* label = m == AiMode::Normal ? "Normal" : obsbot::AiModeName(m);
         if (ToggleButton(label, m == current, ImVec2(bw, 0))) worker_.SetAiMode(m);
         if (m == AiMode::Desk) ImGui::SetItemTooltip("Desk mode may not work on every firmware version.");
     }
+
+    RowLabel("Speed");
+    const char* speeds[] = {"Standard", "Sport"};
+    const char* speedTips[] = {"Smooth, steady framing.", "Follows fast movement more closely."};
+    const int speed = Segmented("##speed", speeds, 2, s.status.sportTracking ? 1 : 0, speedTips);
+    if (speed >= 0) worker_.SetSportTracking(speed == 1);
+
     if (s.status.valid && !s.status.aiModeKnown)
         ImGui::TextDisabled("Camera reports an unknown mode (%u, %u).", s.status.aiM, s.status.aiN);
     ImGui::EndDisabled();
@@ -404,9 +662,10 @@ void App::DrawGimbal(const CameraState& s) {
     SectionTitle("GIMBAL AND ZOOM");
     const float dpi = ImGui::GetStyle().FontScaleDpi;
     const float b = 46.0f * dpi;
-    const float sp = ImGui::GetStyle().ItemSpacing.x * 0.5f;
+    const float sp = Gap() * 0.5f;
     const ImVec2 origin = ImGui::GetCursorPos();
     const float padW = b * 3 + sp * 2;
+    const float padH = b * 3 + sp * 2;
 
     // 3x3 pad: arrows around a Centre button.
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(sp, sp));
@@ -434,37 +693,77 @@ void App::DrawGimbal(const CameraState& s) {
     const bool down = ArrowPadButton("##down", ImGuiDir_Down, b);
     ImGui::PopStyleVar();
 
-    // Options to the right of the pad.
-    const float optX = origin.x + padW + ImGui::GetStyle().ItemSpacing.x * 2;
-    ImGui::SetCursorPos(ImVec2(optX, origin.y));
+    // Position sliders beside the pad, centred on it vertically.
+    const float rowsH = ImGui::GetFrameHeight() * 3 + ImGui::GetStyle().ItemSpacing.y * 2;
+    ImGui::SetCursorPos(ImVec2(origin.x + padW + Gap() * 2, origin.y + std::max(0.0f, (padH - rowsH) * 0.5f)));
     ImGui::BeginGroup();
-    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
-    ImGui::TextDisabled("Movement");
-    int method = settings_.moveMethod;
-    if (ImGui::RadioButton("Smooth (vendor)", &method, static_cast<int>(MoveMethod::GimbalSpeed)) ||
-        ImGui::RadioButton("Steps (UVC)", &method, static_cast<int>(MoveMethod::UvcSteps)))
-        settings_.moveMethod = method;
-    ImGui::SetItemTooltip("If one method doesn't move your camera, try the other.");
-    if (settings_.moveMethod == static_cast<int>(MoveMethod::GimbalSpeed))
-        ImGui::SliderFloat("##speed", &settings_.moveSpeed, 5.0f, 90.0f, "Speed %.0f\xC2\xB0/s");
-    settings_.moveSpeed = safety::MoveSpeed(settings_.moveSpeed);
-    ImGui::Checkbox("Invert left/right", &settings_.invertPan);
-    ImGui::PopItemWidth();
+    // Absolute pan/tilt (UVC). Large ranges are arc-seconds: show degrees.
+    auto angleSlider = [&](UvcCtl c, const char* label) {
+        const UvcInfo& u = U(s, c);
+        ImGui::PushID(label);
+        RowLabel(label, CompactLabelWidth());
+        if (!u.supported) {
+            ImGui::TextDisabled("Not available");
+            ImGui::PopID();
+            return;
+        }
+        const float perDeg = (static_cast<int64_t>(u.max) - u.min) > 3600 ? 3600.0f : 1.0f;
+        float deg = u.value / perDeg;
+        const float mn = u.min / perDeg, mx = u.max / perDeg;
+        if (SliderTrack("##v", ImGuiDataType_Float, &deg, &mn, &mx, "%.0f", TrackWidth(false)))
+            worker_.SetUvc(c, safety::AngleValue(deg, perDeg, u.min, u.max), false);
+        char buf[32];
+        snprintf(buf, sizeof buf, "%.0f\xC2\xB0", deg);
+        ValueText(buf);
+        ImGui::PopID();
+    };
+    angleSlider(UvcCtl::Pan, "Pan");
+    angleSlider(UvcCtl::Tilt, "Tilt");
+    UvcSlider(s, UvcCtl::Zoom, "Zoom", CompactLabelWidth(), false);
     ImGui::EndGroup();
     const float groupBottom = ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY();
-    ImGui::SetCursorPos(ImVec2(origin.x, std::max(origin.y + (b + sp) * 3, groupBottom + ImGui::GetStyle().ItemSpacing.y)));
+    ImGui::SetCursorPos(ImVec2(origin.x, std::max(origin.y + padH, groupBottom) + ImGui::GetStyle().ItemSpacing.y));
 
-    // Hold-to-move.
+    // How the arrow pad moves the camera.
+    RowLabel("Movement");
+    const char* methods[] = {"Smooth (vendor)", "Steps (UVC)"};
+    const char* methodTips[] = {"Moves at a steady speed using OBSBOT's own command.",
+                                "Moves in small standard webcam steps. Try this if Smooth doesn't move your camera."};
+    const int method = Segmented("##method", methods, 2, settings_.moveMethod, methodTips);
+    if (method >= 0 && method != settings_.moveMethod) {
+        settings_.moveMethod = method;
+        settings_.Save();
+    }
+    const bool smooth = settings_.moveMethod == static_cast<int>(MoveMethod::GimbalSpeed);
+
+    ImGui::BeginDisabled(!smooth);
+    RowLabel("Speed");
+    const float minSpeed = 5.0f, maxSpeed = 90.0f;
+    SliderTrack("##speed", ImGuiDataType_Float, &settings_.moveSpeed, &minSpeed, &maxSpeed, "%.0f", TrackWidth(false));
+    if (!smooth) ImGui::SetItemTooltip("Only used by Smooth movement.");
+    settings_.moveSpeed = safety::MoveSpeed(settings_.moveSpeed);
+    char speedText[32];
+    snprintf(speedText, sizeof speedText, "%.0f\xC2\xB0/s", settings_.moveSpeed);
+    ValueText(speedText);
+    ImGui::EndDisabled();
+
+    RowLabel("Invert");
+    if (ToggleSwitch("Horizontal", &settings_.invertHorizontal)) settings_.Save();
+    ImGui::SetItemTooltip("Swap the left and right arrows.");
+    ImGui::SameLine(0, Gap() * 3);
+    if (ToggleSwitch("Vertical", &settings_.invertVertical)) settings_.Save();
+    ImGui::SetItemTooltip("Swap the up and down arrows.");
+
+    // Hold-to-move. MoveSigns knows which axis each method runs the opposite way
+    // on (checked on a Tiny 2 Lite) and applies the invert switches on top.
     const int dx = (right ? 1 : 0) - (left ? 1 : 0);
     const int dy = (up ? 1 : 0) - (down ? 1 : 0);
     if (dx || dy) {
         holding_ = true;
-        const int sx = settings_.invertPan ? -dx : dx;
-        const int sy = settings_.invertTilt ? -dy : dy;
-        if (settings_.moveMethod == static_cast<int>(MoveMethod::GimbalSpeed)) {
-            // Positive yaw turns the camera towards its own left, which is the
-            // viewer's right in an unmirrored preview.
-            worker_.HoldGimbalVelocity(sy * settings_.moveSpeed, sx * settings_.moveSpeed);
+        const safety::MoveSign sign =
+            safety::MoveSigns(smooth, dx, dy, settings_.invertHorizontal, settings_.invertVertical);
+        if (smooth) {
+            worker_.HoldGimbalVelocity(sign.tilt * settings_.moveSpeed, sign.pan * settings_.moveSpeed);
         } else {
             const auto now = std::chrono::steady_clock::now();
             if (now - lastStep_ > std::chrono::milliseconds(150)) {
@@ -474,45 +773,28 @@ void App::DrawGimbal(const CameraState& s) {
                     if (!dir || !u.supported) return;
                     worker_.SetUvc(c, safety::StepValue(u.value, u.min, u.max, u.step, dir), false);
                 };
-                step(UvcCtl::Pan, sx);
-                step(UvcCtl::Tilt, sy);
+                step(UvcCtl::Pan, sign.pan);
+                step(UvcCtl::Tilt, sign.tilt);
             }
         }
     }
-
-    // Absolute sliders (UVC). Large ranges are arc-seconds: show degrees.
-    auto angleSlider = [&](UvcCtl c, const char* label) {
-        const UvcInfo& u = U(s, c);
-        if (!u.supported) {
-            ImGui::TextDisabled("%s: not available", label);
-            return;
-        }
-        const float perDeg = (static_cast<int64_t>(u.max) - u.min) > 3600 ? 3600.0f : 1.0f;
-        float deg = u.value / perDeg;
-        ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Pan  ").x - ImGui::GetStyle().ItemInnerSpacing.x);
-        if (ImGui::SliderFloat(label, &deg, u.min / perDeg, u.max / perDeg, "%.0f\xC2\xB0"))
-            worker_.SetUvc(c, safety::AngleValue(deg, perDeg, u.min, u.max), false);
-    };
-    angleSlider(UvcCtl::Pan, "Pan");
-    angleSlider(UvcCtl::Tilt, "Tilt");
-    UvcSlider(s, UvcCtl::Zoom, "Zoom");
 }
 
 void App::DrawPresets(const CameraState& s) {
     SectionTitle("PRESETS");
     const bool usable = U(s, UvcCtl::Pan).supported && U(s, UvcCtl::Tilt).supported;
     ImGui::BeginDisabled(!usable);
-    const float bw = ImGui::CalcTextSize("Update").x + ImGui::GetStyle().FramePadding.x * 2;
     for (size_t i = 0; i < settings_.presets.size(); ++i) {
         Preset& p = settings_.presets[i];
         ImGui::PushID(static_cast<int>(i));
-        ImGui::AlignTextToFramePadding();
-        ImGui::Text("Preset %zu", i + 1);
-        ImGui::SameLine(ImGui::CalcTextSize("Preset 3").x + ImGui::GetStyle().ItemSpacing.x * 3);
+        char label[32];
+        snprintf(label, sizeof label, "Preset %zu", i + 1);
+        RowLabel(label);
+        const float bw = EqualWidth(3);
         ImGui::BeginDisabled(!p.saved);
         if (ImGui::Button("Go", ImVec2(bw, 0))) worker_.GotoPosition(p.pan, p.tilt, p.zoom);
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        ImGui::SameLine(0, Gap());
         if (ImGui::Button(p.saved ? "Update" : "Save", ImVec2(bw, 0))) {
             p.saved = true;
             p.pan = U(s, UvcCtl::Pan).value;
@@ -521,13 +803,13 @@ void App::DrawPresets(const CameraState& s) {
             settings_.Save();
             LOG_INFO("Saved preset %zu (pan %ld, tilt %ld, zoom %ld).", i + 1, p.pan, p.tilt, p.zoom);
         }
-        if (p.saved) {
-            ImGui::SameLine();
-            if (ImGui::Button("Clear", ImVec2(bw, 0))) {
-                p = Preset{};
-                settings_.Save();
-            }
+        ImGui::SameLine(0, Gap());
+        ImGui::BeginDisabled(!p.saved);
+        if (ImGui::Button("Clear", ImVec2(bw, 0))) {
+            p = Preset{};
+            settings_.Save();
         }
+        ImGui::EndDisabled();
         ImGui::PopID();
     }
     ImGui::EndDisabled();
@@ -536,56 +818,58 @@ void App::DrawPresets(const CameraState& s) {
 
 // ---- Image tab -------------------------------------------------------------------------------
 
-void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label) {
+void App::UvcSlider(const CameraState& s, UvcCtl c, const char* label, float labelWidth, bool autoColumn) {
     const UvcInfo& u = U(s, c);
     ImGui::PushID(static_cast<int>(c));
+    RowLabel(label, labelWidth);
     if (!u.supported) {
-        ImGui::TextDisabled("%s: not available", label);
+        ImGui::TextDisabled("Not available");
         ImGui::PopID();
         return;
     }
-    const float labelW = ImGui::GetFontSize() * 7.5f;
-    const float autoW = u.canAuto ? ImGui::CalcTextSize("Auto").x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2 : 0;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    ImGui::SameLine(labelW);
     ImGui::BeginDisabled(u.isAuto);
     int64_t v = u.value;
     const int64_t min = u.min, max = u.max;
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - autoW);
-    if (ImGui::SliderScalar("##v", ImGuiDataType_S64, &v, &min, &max, "%lld", ImGuiSliderFlags_AlwaysClamp))
+    if (SliderTrack("##v", ImGuiDataType_S64, &v, &min, &max, "%lld", TrackWidth(autoColumn)))
         worker_.SetUvc(c, static_cast<long>(v), false);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) worker_.SetUvc(c, u.def, false);
     ImGui::SetItemTooltip("Double-click to reset (default %ld).", u.def);
+    char buf[32];
+    snprintf(buf, sizeof buf, "%lld", static_cast<long long>(v));
+    ValueText(buf);
     ImGui::EndDisabled();
-    if (u.canAuto) {
-        ImGui::SameLine();
+    if (autoColumn && u.canAuto) {
+        ImGui::SameLine(0, Gap());
         bool a = u.isAuto;
-        if (ImGui::Checkbox("Auto", &a)) worker_.SetUvc(c, u.value, a);
+        if (ToggleSwitch("Auto", &a)) worker_.SetUvc(c, u.value, a);
     }
     ImGui::PopID();
 }
 
 void App::DrawImageTab(const CameraState& s) {
     ImGui::BeginDisabled(!s.connected);
+    const float lw = LabelWidth();
     SectionTitle("PICTURE");
-    UvcSlider(s, UvcCtl::Brightness, "Brightness");
-    UvcSlider(s, UvcCtl::Contrast, "Contrast");
-    UvcSlider(s, UvcCtl::Saturation, "Saturation");
-    UvcSlider(s, UvcCtl::Sharpness, "Sharpness");
-    UvcSlider(s, UvcCtl::Hue, "Hue");
-    UvcSlider(s, UvcCtl::Gamma, "Gamma");
+    UvcSlider(s, UvcCtl::Brightness, "Brightness", lw, true);
+    UvcSlider(s, UvcCtl::Contrast, "Contrast", lw, true);
+    UvcSlider(s, UvcCtl::Saturation, "Saturation", lw, true);
+    UvcSlider(s, UvcCtl::Sharpness, "Sharpness", lw, true);
+    UvcSlider(s, UvcCtl::Hue, "Hue", lw, true);
+    UvcSlider(s, UvcCtl::Gamma, "Gamma", lw, true);
     SectionTitle("COLOUR AND LIGHT");
-    UvcSlider(s, UvcCtl::WhiteBalance, "White balance");
-    UvcSlider(s, UvcCtl::Exposure, "Exposure");
-    UvcSlider(s, UvcCtl::Gain, "Gain");
-    UvcSlider(s, UvcCtl::BacklightComp, "Backlight");
+    UvcSlider(s, UvcCtl::WhiteBalance, "White balance", lw, true);
+    UvcSlider(s, UvcCtl::Exposure, "Exposure", lw, true);
+    UvcSlider(s, UvcCtl::Gain, "Gain", lw, true);
+    UvcSlider(s, UvcCtl::BacklightComp, "Backlight", lw, true);
     SectionTitle("FOCUS");
-    UvcSlider(s, UvcCtl::Focus, "Focus");
+    UvcSlider(s, UvcCtl::Focus, "Focus", lw, true);
     ImGui::Spacing();
-    if (ImGui::Button("Reset image to camera defaults")) worker_.ResetImageDefaults();
-    ImGui::SameLine();
-    if (ImGui::Button("Refresh")) worker_.RefreshAll();
+    const float bw = EqualWidth(2);
+    if (ImGui::Button("Reset to defaults", ImVec2(bw, 0))) worker_.ResetImageDefaults();
+    ImGui::SetItemTooltip("Put every picture setting back to the camera's own defaults.");
+    ImGui::SameLine(0, Gap());
+    if (ImGui::Button("Refresh", ImVec2(bw, 0))) worker_.RefreshAll();
+    ImGui::SetItemTooltip("Read every setting from the camera again.");
     ImGui::EndDisabled();
 }
 
@@ -595,49 +879,47 @@ void App::DrawCameraTab(const CameraState& s) {
     ImGui::BeginDisabled(!s.connected);
     SectionTitle("PICTURE MODE");
     ImGui::BeginDisabled(!s.xu);
+    RowLabel("HDR", "High dynamic range: helps when there's a bright window behind you. May lower the frame rate.");
     bool hdr = s.status.hdr;
-    if (ImGui::Checkbox("HDR", &hdr)) worker_.SetHdr(hdr);
-    HelpMarker("High dynamic range: helps when there's a bright window behind you. May lower the frame rate.");
+    if (ToggleSwitch("##hdr", &hdr)) worker_.SetHdr(hdr);
 
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Field of view");
+    RowLabel("Field of view");
     Fov currentFov = Fov::Count;
     if (s.status.valid) obsbot::FovFromStatus(s.status.fovRaw, s.variant, &currentFov);
-    for (int i = 0; i < static_cast<int>(Fov::Count); ++i) {
-        ImGui::SameLine();
-        if (ImGui::RadioButton(obsbot::FovName(static_cast<Fov>(i)), currentFov == static_cast<Fov>(i)))
-            worker_.SetFov(static_cast<Fov>(i));
-    }
+    const char* fovs[static_cast<int>(Fov::Count)];
+    for (int i = 0; i < static_cast<int>(Fov::Count); ++i) fovs[i] = obsbot::FovName(static_cast<Fov>(i));
+    const int fov = Segmented("##fov", fovs, static_cast<int>(Fov::Count), static_cast<int>(currentFov));
+    if (fov >= 0) worker_.SetFov(static_cast<Fov>(fov));
     ImGui::EndDisabled();
     ImGui::EndDisabled();
 
     SectionTitle("ANTI-FLICKER");
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Mains power");
-    HelpMarker("Matches the camera to your mains power to stop lights flickering on video. "
-               "New Zealand and Australia use 50 Hz. Applied each time the camera connects.");
+    RowLabel("Mains power", "Matches the camera to your mains power to stop lights flickering on video. "
+                            "New Zealand and Australia use 50 Hz. Applied each time the camera connects.");
     ImGui::BeginDisabled(!s.connected || !U(s, UvcCtl::PowerLine).supported);
-    for (int v : {kPowerLineDisabled, kPowerLine50Hz, kPowerLine60Hz}) {
-        ImGui::SameLine();
-        if (ImGui::RadioButton(AntiFlickerName(v), settings_.antiFlicker == v)) {
-            settings_.antiFlicker = v;
-            worker_.SetAntiFlickerOnConnect(v);
-            worker_.SetUvc(UvcCtl::PowerLine, v, false);
-            settings_.Save();
-        }
+    const long powerValues[] = {kPowerLineDisabled, kPowerLine50Hz, kPowerLine60Hz};
+    const char* powerNames[] = {AntiFlickerName(powerValues[0]), AntiFlickerName(powerValues[1]),
+                                AntiFlickerName(powerValues[2])};
+    int powerSel = -1;
+    for (int i = 0; i < 3; ++i)
+        if (settings_.antiFlicker == powerValues[i]) powerSel = i;
+    const int power = Segmented("##power", powerNames, 3, powerSel);
+    if (power >= 0) {
+        const int v = static_cast<int>(powerValues[power]);
+        settings_.antiFlicker = v;
+        worker_.SetAntiFlickerOnConnect(v);
+        worker_.SetUvc(UvcCtl::PowerLine, v, false);
+        settings_.Save();
     }
     ImGui::EndDisabled();
-    if (s.connected && U(s, UvcCtl::PowerLine).supported)
+    if (s.connected && U(s, UvcCtl::PowerLine).supported) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + LabelWidth());
         ImGui::TextDisabled("Camera currently reports: %s", AntiFlickerName(U(s, UvcCtl::PowerLine).value));
-
-    SectionTitle("PREVIEW");
-    if (ImGui::Checkbox("Show live preview", &settings_.previewEnabled)) settings_.Save();
-    HelpMarker("Turn this off if you want another app (Teams, Zoom, OBS) to use the camera while this window "
-               "is open. Controls keep working without the preview.");
+    }
 
     SectionTitle("ADVANCED");
-    if (ImGui::Checkbox("Show developer tools", &settings_.showDeveloper)) settings_.Save();
-    HelpMarker("Adds a Developer tab for testing raw camera commands. You won't need it for everyday use.");
+    RowLabel("Developer tab", "Adds a Developer tab for testing raw camera commands. You won't need it for everyday use.");
+    if (ToggleSwitch("##developer", &settings_.showDeveloper)) settings_.Save();
 
     SectionTitle("ABOUT");
     ImGui::Text("osbot-oss-windows %s", OSBOT_VERSION_STRING);
@@ -690,13 +972,14 @@ std::string App::Diagnostics(const CameraState& s) {
 }
 
 void App::DrawLogTab(const CameraState& s) {
-    if (ImGui::Button("Copy diagnostics")) {
+    const float bw = EqualWidth(2);
+    if (ImGui::Button("Copy diagnostics", ImVec2(bw, 0))) {
         ImGui::SetClipboardText(Diagnostics(s).c_str());
         LOG_INFO("Diagnostics copied to the clipboard.");
     }
     ImGui::SetItemTooltip("Copies camera details and this log so you can paste them into a bug report.");
-    ImGui::SameLine();
-    if (ImGui::Button("Clear")) logx::Clear();
+    ImGui::SameLine(0, Gap());
+    if (ImGui::Button("Clear log", ImVec2(bw, 0))) logx::Clear();
 
     ImGui::BeginChild("##log", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
     const auto entries = logx::Snapshot();
@@ -738,7 +1021,6 @@ void App::DrawDeveloperTab(const CameraState& s) {
     ImGui::TextDisabled("In use: %s codes. Affects field of view and sleep commands.",
                         s.variant == obsbot::Variant::Lite ? "Tiny 2 Lite" : "Tiny 2");
     ImGui::PopTextWrapPos();
-    ImGui::Checkbox("Invert up/down", &settings_.invertTilt);
 
     ImGui::BeginDisabled(!s.connected || !s.xu);
     SectionTitle("STATUS BLOCK (SELECTOR 6)");

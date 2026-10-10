@@ -116,7 +116,10 @@ off 16..  payload (max 44 bytes), rest zero
 off the USB bus. Don't fuzz. Upgrade (0x0D), system and BLE subsystems are off limits.
 
 Sign convention for yaw is unclear (lxman: positive yaw turns towards the
-camera's own left). The app has "Invert left/right" and "Invert up/down" settings.
+camera's own left). Hardware testing on a Tiny 2 Lite (10/10/2026) found that the
+gimbal speed command moves up/down the opposite way to the arrows, and UVC pan steps
+move left/right the opposite way, so the app flips those axes by default. The
+*Invert horizontal* and *Invert vertical* switches flip them again if needed.
 
 ## Selector 6 GET: status block
 
