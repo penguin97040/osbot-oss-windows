@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cwctype>
@@ -74,10 +75,15 @@ std::string FourCc(const GUID& subtype) {
     if (subtype == MFVideoFormat_YUY2) return "YUY2";
     if (subtype == MFVideoFormat_H264) return "H264";
     if (subtype == MFVideoFormat_RGB32) return "RGB32";
-    char buf[5] = {};
+    // A real FOURCC is four printable characters. Other subtypes (e.g. RGB24 is 20)
+    // get their number, so two different ones can never share a format key.
+    char buf[16] = {};
     std::memcpy(buf, &subtype.Data1, 4);
-    for (char& c : buf)
-        if (c && (c < 32 || c > 126)) c = '?';
+    for (int i = 0; i < 4; ++i)
+        if (buf[i] < 32 || buf[i] > 126) {
+            snprintf(buf, sizeof buf, "0x%08lX", static_cast<unsigned long>(subtype.Data1));
+            break;
+        }
     return buf;
 }
 
@@ -109,9 +115,6 @@ double ScoreType(IMFMediaType* type) {
     double score = -std::fabs(static_cast<double>(w) * h - 1280.0 * 720.0) / 1e5;
     if (fps < 29) score -= 100;
     if (fps > 31) score -= 1;  // 30 fps is plenty for a preview
-    GUID sub{};
-    type->GetGUID(MF_MT_SUBTYPE, &sub);
-    if (sub == MFVideoFormat_H264) score -= 1000;
     return score;
 }
 
@@ -246,6 +249,7 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
         {
             struct Native {
                 PreviewFormat format;
+                std::string key;
                 ComPtr<IMFMediaType> type;
                 double score;
             };
@@ -262,10 +266,10 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
                 // the same sizes uncompressed or as MJPG anyway.
                 if (sub == MFVideoFormat_H264 || !safety::Geometry(f.width, f.height)) continue;
                 f.fourcc = FourCc(sub);
-                const std::string id = f.Key();
-                if (std::any_of(natives.begin(), natives.end(), [&](const Native& n) { return n.format.Key() == id; }))
+                std::string id = f.Key();
+                if (std::any_of(natives.begin(), natives.end(), [&](const Native& n) { return n.key == id; }))
                     continue;
-                natives.push_back({f, t, ScoreType(t.Get())});
+                natives.push_back({f, std::move(id), t, ScoreType(t.Get())});
             }
             const Native* best = nullptr;
             for (const Native& n : natives)
@@ -273,24 +277,19 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
             const Native* chosen = best;
             if (best && !formatKey.empty()) {
                 auto it = std::find_if(natives.begin(), natives.end(),
-                                       [&](const Native& n) { return n.format.Key() == formatKey; });
+                                       [&](const Native& n) { return n.key == formatKey; });
                 if (it != natives.end())
                     chosen = &*it;
                 else
                     LOG_WARN("Preview: the chosen format isn't offered by this camera; using the default.");
             }
+            // Unsorted: the picker helpers in PreviewFormat.h order what they show.
             std::vector<PreviewFormat> list;
             for (const Native& n : natives) list.push_back(n.format);
-            std::stable_sort(list.begin(), list.end(), [](const PreviewFormat& a, const PreviewFormat& b) {
-                const uint64_t pa = static_cast<uint64_t>(a.width) * a.height;
-                const uint64_t pb = static_cast<uint64_t>(b.width) * b.height;
-                if (pa != pb) return pa > pb;
-                return a.Fps() > b.Fps();
-            });
             {
                 std::lock_guard<std::mutex> lock(frameMutex_);
                 formats_ = std::move(list);
-                defaultFormatKey_ = best ? best->format.Key() : std::string();
+                defaultFormatKey_ = best ? best->key : std::string();
             }
 
             HRESULT hr = chosen ? reader->SetCurrentMediaType(stream, nullptr, chosen->type.Get()) : S_OK;
@@ -309,7 +308,7 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
             }
             std::lock_guard<std::mutex> lock(frameMutex_);
             format_ = chosen ? chosen->format.Label() : std::string("Camera default format");
-            formatKey_ = chosen ? chosen->format.Key() : std::string();
+            formatKey_ = chosen ? chosen->key : std::string();
         }
 
         // Frame geometry of the RGB32 output. Re-read whenever the reader reports a

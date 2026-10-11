@@ -26,6 +26,8 @@ public:
     Settings& GetSettings() { return settings_; }
 
     static void ApplyTheme(float dpiScale);
+    // The window background (0xRRGGBB), shared with the title bar and swap-chain clear in main.cpp.
+    static constexpr unsigned kBackgroundRgb = 0x06090D;
     // The bold face for headings; null falls back to the default font.
     static void SetHeadingFont(ImFont* font);
 

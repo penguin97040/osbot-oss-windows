@@ -2,7 +2,7 @@
 
 Automated tests cover protocol encoding and safety helpers, but every camera feature needs
 a real test on Windows with the OBSBOT plugged in. Run through this list after
-each release. **Real Windows camera verification of the redesigned interface is pending.**
+each release. The redesigned interface was checked on a real Tiny 2 Lite before v0.2.0 was released.
 
 ## Before you start
 

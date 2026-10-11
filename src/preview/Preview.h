@@ -35,7 +35,7 @@ public:
     std::string Error();   // non-empty when the preview stopped because of a problem
     std::string Format();  // e.g. "1280×720 MJPG 30 fps"
 
-    // The camera's native formats (largest first) and the default choice. Kept
+    // The camera's native formats (in the order offered) and the default choice. Kept
     // from the last time the camera was opened, so they survive a restart.
     std::vector<PreviewFormat> Formats();
     std::string DefaultFormatKey();

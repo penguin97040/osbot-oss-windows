@@ -28,7 +28,7 @@ ImVec4 Hex(unsigned rgb, float alpha = 1.0f) {
 // The user's neon cyan, #67F7FF, at a given strength. Highlights use 85% of it so
 // they don't overpower the rest on high-contrast (OLED) screens; hover is the full colour.
 ImVec4 Accent(float alpha) { return Hex(0x67F7FF, alpha); }
-const ImVec4 kBg = Hex(0x06090D);
+const ImVec4 kBg = Hex(App::kBackgroundRgb);
 const ImVec4 kPanel = Hex(0x0B1117);
 const ImVec4 kFrame = Hex(0x15222C);
 const ImVec4 kFrameHover = Hex(0x1C2E3A);
@@ -181,7 +181,15 @@ bool SliderTrack(const char* id, ImGuiDataType type, void* value, const void* mi
     const float radius = style.GrabMinSize * 0.62f * (hovered || active ? 1.15f : 1.0f);
     const float x0 = bb.Min.x + 2.0f + style.GrabMinSize * 0.5f;
     const float x1 = bb.Max.x - 2.0f - style.GrabMinSize * 0.5f;
-    const float gx = grab.Max.x > grab.Min.x ? std::clamp((grab.Min.x + grab.Max.x) * 0.5f, x0, x1) : x0;
+    // Map the grab's position into the drawn track. For small integer ranges Dear ImGui
+    // widens the grab to one unit, so its centre never reaches the ends of the slider.
+    float gx = x0;
+    if (grab.Max.x > grab.Min.x) {
+        const float gs = grab.Max.x - grab.Min.x;
+        const float u0 = bb.Min.x + 2.0f + gs * 0.5f, u1 = bb.Max.x - 2.0f - gs * 0.5f;
+        const float t = u1 > u0 ? std::clamp(((grab.Min.x + grab.Max.x) * 0.5f - u0) / (u1 - u0), 0.0f, 1.0f) : 0.0f;
+        gx = x0 + t * (x1 - x0);
+    }
 
     ImDrawList* dl = window->DrawList;
     ImGui::RenderNavCursor(bb, gid);
@@ -291,17 +299,20 @@ bool BeginDropdown(const char* id, const char* preview, float width = 0.0f) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const bool wasOpen = ImGui::IsPopupOpen(id);
 
     ImGui::SetNextItemWidth(width);
-    const bool open = ImGui::BeginCombo(id, preview, ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_HeightLarge);
-    const bool lit = open || wasOpen || ImGui::IsItemHovered();
+    const bool open = ImGui::BeginCombo(id, "", ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_HeightLarge);
+    const bool lit = open || ImGui::IsItemHovered();
 
     // A "v" (or "^" while the list is open) drawn over the frame, right-aligned.
     const float cx = std::round(p.x + width - style.FramePadding.x - chevronW * 0.5f);
     const float cy = std::round(p.y + h * 0.5f);
     const float half = chevronW * 0.5f, rise = std::round(ImGui::GetFontSize() * 0.14f);
-    const float dir = (open || wasOpen) ? -1.0f : 1.0f;
+    const float dir = open ? -1.0f : 1.0f;
+    // The preview text, cut short with "..." before the chevron rather than running under it.
+    const float textEnd = cx - half - style.FramePadding.x * 0.5f;
+    ImGui::RenderTextEllipsis(dl, ImVec2(p.x + style.FramePadding.x, p.y + style.FramePadding.y), ImVec2(textEnd, p.y + h),
+                              textEnd, preview, nullptr, nullptr);
     const ImVec2 points[3] = {ImVec2(cx - half, cy - rise * dir), ImVec2(cx, cy + rise * dir),
                               ImVec2(cx + half, cy - rise * dir)};
     dl->AddPolyline(points, 3, ImGui::GetColorU32(lit ? kAccent : kTextDim),
@@ -726,6 +737,9 @@ void App::DrawPreviewToolbar(const CameraState& s) {
 
     const char* label = "Live preview";
     const float w = SwitchWidth() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+    // In a narrow window the pickers leave no room: put the switch on its own line
+    // rather than past the edge of the (clipped, unscrollable) preview area.
+    if (ImGui::GetContentRegionAvail().x < w) ImGui::NewLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
     if (ToggleSwitch(label, &settings_.previewEnabled)) settings_.Save();
     Tooltip("Turn this off if you want another app (Teams, Zoom, OBS) to use the camera while this window "

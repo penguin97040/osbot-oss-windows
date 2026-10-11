@@ -110,12 +110,18 @@ struct WindowCleanup {
     }
 };
 
+// The window background from the palette (App::kBackgroundRgb), as a GDI colour.
+COLORREF BackgroundColourRef() {
+    constexpr unsigned rgb = App::kBackgroundRgb;
+    return RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+}
+
 // Dark title bar on Windows 10 (build 18985+) and Windows 11.
 void UseDarkTitleBar(HWND hwnd) {
     BOOL dark = TRUE;
     if (FAILED(DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark)))
         DwmSetWindowAttribute(hwnd, 19 /* pre-20H1 value */, &dark, sizeof dark);
-    COLORREF caption = RGB(0x06, 0x09, 0x0D);  // matches the window background (Windows 11 only)
+    COLORREF caption = BackgroundColourRef();  // matches the window background (Windows 11 only)
     DwmSetWindowAttribute(hwnd, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
 }
 
@@ -242,7 +248,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hIconSm = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(0x06, 0x09, 0x0D));
+    wc.hbrBackground = CreateSolidBrush(BackgroundColourRef());
     wc.lpszClassName = kWindowClass;
     window.brush = wc.hbrBackground;
     if (!RegisterClassExW(&wc)) {
@@ -289,7 +295,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
 
     app.Init(hwnd, g_device, g_context);
 
-    const float clear[4] = {0.024f, 0.035f, 0.051f, 1.0f};  // #06090D, as kBg
+    const float clear[4] = {static_cast<float>((App::kBackgroundRgb >> 16) & 0xFF) / 255.0f,
+                            static_cast<float>((App::kBackgroundRgb >> 8) & 0xFF) / 255.0f,
+                            static_cast<float>(App::kBackgroundRgb & 0xFF) / 255.0f, 1.0f};
     bool done = false;
     bool graphicsFailed = false;
     int busyFrames = 0;
