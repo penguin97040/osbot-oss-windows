@@ -278,6 +278,55 @@ int Segmented(const char* id, const char* const* labels, int count, int selected
     return clicked;
 }
 
+// A dropdown with a thin chevron instead of Dear ImGui's boxed triangle. width > 0
+// is a fixed width, < 0 fills the row and 0 fits the preview text. Use it like
+// BeginCombo: call EndCombo() only when it returns true.
+bool BeginDropdown(const char* id, const char* preview, float width = 0.0f) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float chevronW = std::round(ImGui::GetFontSize() * 0.55f);
+    if (width == 0.0f)
+        width = ImGui::CalcTextSize(preview).x + style.FramePadding.x * 3 + chevronW;
+    else if (width < 0.0f)
+        width = ImGui::GetContentRegionAvail().x;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float h = ImGui::GetFrameHeight();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const bool wasOpen = ImGui::IsPopupOpen(id);
+
+    ImGui::SetNextItemWidth(width);
+    const bool open = ImGui::BeginCombo(id, preview, ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_HeightLarge);
+    const bool lit = open || wasOpen || ImGui::IsItemHovered();
+
+    // A "v" (or "^" while the list is open) drawn over the frame, right-aligned.
+    const float cx = std::round(p.x + width - style.FramePadding.x - chevronW * 0.5f);
+    const float cy = std::round(p.y + h * 0.5f);
+    const float half = chevronW * 0.5f, rise = std::round(ImGui::GetFontSize() * 0.14f);
+    const float dir = (open || wasOpen) ? -1.0f : 1.0f;
+    const ImVec2 points[3] = {ImVec2(cx - half, cy - rise * dir), ImVec2(cx, cy + rise * dir),
+                              ImVec2(cx + half, cy - rise * dir)};
+    dl->AddPolyline(points, 3, ImGui::GetColorU32(lit ? kAccent : kTextDim),
+                    std::max(1.0f, std::round(ImGui::GetFontSize() * 0.08f)));
+    return open;
+}
+
+// A dropdown over a fixed list of choices. Returns true when the choice changes.
+bool DropdownList(const char* id, int* selected, const char* const* items, int count, float width = 0.0f) {
+    const char* preview = *selected >= 0 && *selected < count ? items[*selected] : "";
+    bool changed = false;
+    if (BeginDropdown(id, preview, width)) {
+        for (int i = 0; i < count; ++i) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(items[i], i == *selected) && i != *selected) {
+                *selected = i;
+                changed = true;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
 // A button that lights up (neon outline, accent text and a soft glow) when selected.
 bool ToggleButton(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
     if (selected) {
@@ -589,8 +638,7 @@ void App::DrawHeader(const CameraState& s) {
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
         if (s.available.size() > 1) {
-            ImGui::SetNextItemWidth(comboW);
-            if (ImGui::BeginCombo("##device", s.device.name.c_str())) {
+            if (BeginDropdown("##device", s.device.name.c_str(), comboW)) {
                 for (const auto& d : s.available) {
                     bool sel = d.path == s.device.path;
                     std::string label2 = d.name + "##" + NarrowPath(d.path);
@@ -623,7 +671,6 @@ void App::DrawPreviewToolbar(const CameraState& s) {
     if (!cur) cur = def;
 
     if (s.connected && settings_.previewEnabled && cur) {
-        const ImGuiComboFlags flags = ImGuiComboFlags_WidthFitPreview | ImGuiComboFlags_HeightLarge;
         auto choose = [&](uint32_t w, uint32_t h, const std::string& fourcc, int fps) {
             const std::string key = pf::Choose(formats, w, h, fourcc, fps, def ? def->fourcc : std::string());
             if (key.empty()) return;
@@ -636,7 +683,7 @@ void App::DrawPreviewToolbar(const CameraState& s) {
         };
         const bool defSize = def && def->width == cur->width && def->height == cur->height;
 
-        if (ImGui::BeginCombo("##size", PreviewFormat::SizeLabel(cur->width, cur->height).c_str(), flags)) {
+        if (BeginDropdown("##size", PreviewFormat::SizeLabel(cur->width, cur->height).c_str())) {
             for (const auto& [w, h] : pf::Resolutions(formats)) {
                 const bool isDefault = def && def->width == w && def->height == h;
                 const std::string text = item(PreviewFormat::SizeLabel(w, h), isDefault);
@@ -648,7 +695,7 @@ void App::DrawPreviewToolbar(const CameraState& s) {
         ImGui::SetItemTooltip("Preview resolution. Larger sizes use more processor time.");
 
         ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-        if (ImGui::BeginCombo("##pixels", cur->fourcc.c_str(), flags)) {
+        if (BeginDropdown("##pixels", cur->fourcc.c_str())) {
             for (const std::string& fourcc : pf::PixelFormats(formats, cur->width, cur->height)) {
                 const std::string text = item(fourcc, defSize && def->fourcc == fourcc);
                 if (ImGui::Selectable(text.c_str(), fourcc == cur->fourcc))
@@ -660,7 +707,7 @@ void App::DrawPreviewToolbar(const CameraState& s) {
                               "MJPG is compressed and allows higher frame rates at large sizes.");
 
         ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-        if (ImGui::BeginCombo("##rate", PreviewFormat::FpsLabel(cur->RoundedFps()).c_str(), flags)) {
+        if (BeginDropdown("##rate", PreviewFormat::FpsLabel(cur->RoundedFps()).c_str())) {
             for (const int fps : pf::FrameRates(formats, cur->width, cur->height, cur->fourcc)) {
                 const bool isDefault = defSize && def->fourcc == cur->fourcc && def->RoundedFps() == fps;
                 const std::string text = item(PreviewFormat::FpsLabel(fps), isDefault);
@@ -1156,8 +1203,7 @@ void App::DrawDeveloperTab(const CameraState& s) {
 
     SectionTitle("PROTOCOL VARIANT");
     const char* variants[] = {"Automatic (by model)", "Tiny 2 codes", "Tiny 2 Lite codes"};
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::Combo("##variant", &settings_.variant, variants, IM_ARRAYSIZE(variants))) {
+    if (DropdownList("##variant", &settings_.variant, variants, IM_ARRAYSIZE(variants), -1.0f)) {
         worker_.SetVariantSetting(static_cast<VariantSetting>(settings_.variant));
         settings_.Save();
     }
@@ -1199,8 +1245,9 @@ void App::DrawDeveloperTab(const CameraState& s) {
 
     SectionTitle("FRAMED COMMAND (SELECTOR 2)");
     const char* receivers[] = {"Camera (0x02)", "Gimbal (0x03)", "AI (0x04)"};
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
-    ImGui::Combo("Receiver", &devReceiver_, receivers, IM_ARRAYSIZE(receivers));
+    DropdownList("##receiver", &devReceiver_, receivers, IM_ARRAYSIZE(receivers), ImGui::GetFontSize() * 9);
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextUnformatted("Receiver");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
     ImGui::InputTextWithHint("Command", "e.g. A0C2", devCmd_, sizeof devCmd_);
     ImGui::SetNextItemWidth(-1);
