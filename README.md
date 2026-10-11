@@ -45,8 +45,8 @@ Tips:
 
 ## Status
 
-This is early software. Tested on a real Tiny 2 Lite: AI tracking, gimbal, HDR, field of view and sleep
-all work in v0.1.0. Hardware verification of the v0.1.2 safety fixes is pending.
+This is early software. Tested on a real Tiny 2 Lite: AI tracking, gimbal (both movement methods),
+presets, HDR, field of view, sleep and the preview format pickers all work in v0.2.0.
 The Tiny 2 should work too but hasn't been tested. If something doesn't
 work on your camera, see [docs/TESTING.md](docs/TESTING.md) and
 [docs/PROTOCOL.md](docs/PROTOCOL.md).
