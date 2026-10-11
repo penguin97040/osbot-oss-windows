@@ -40,6 +40,9 @@ public:
     std::vector<PreviewFormat> Formats();
     std::string DefaultFormatKey();
     std::string CurrentFormatKey();
+    // Changes whenever Formats(), DefaultFormatKey() or CurrentFormatKey() may have,
+    // so the UI can keep its own copy instead of fetching them every frame.
+    uint64_t FormatGeneration();
 
 private:
     void Run(std::wstring path, std::string formatKey, std::shared_ptr<PreviewReadState> state);
@@ -61,6 +64,7 @@ private:
     std::string formatKey_;
     std::vector<PreviewFormat> formats_;
     std::string defaultFormatKey_;
+    uint64_t formatGen_ = 0;
 
     safety::UploadProgress upload_;
     int texW_ = 0, texH_ = 0;

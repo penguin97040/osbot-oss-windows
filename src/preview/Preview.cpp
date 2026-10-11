@@ -133,6 +133,7 @@ void Preview::Start(const std::wstring& devicePath, const std::string& formatKey
         error_.clear();
         format_.clear();
         formatKey_.clear();
+        ++formatGen_;
         frame_.clear();
         frameId_ = 0;
         upload_.uploaded = 0;
@@ -179,6 +180,11 @@ std::string Preview::DefaultFormatKey() {
 std::string Preview::CurrentFormatKey() {
     std::lock_guard<std::mutex> lock(frameMutex_);
     return formatKey_;
+}
+
+uint64_t Preview::FormatGeneration() {
+    std::lock_guard<std::mutex> lock(frameMutex_);
+    return formatGen_;
 }
 
 void Preview::SetError(const std::string& e) {
@@ -290,6 +296,7 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
                 std::lock_guard<std::mutex> lock(frameMutex_);
                 formats_ = std::move(list);
                 defaultFormatKey_ = best ? best->key : std::string();
+                ++formatGen_;
             }
 
             HRESULT hr = chosen ? reader->SetCurrentMediaType(stream, nullptr, chosen->type.Get()) : S_OK;
@@ -309,6 +316,7 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
             std::lock_guard<std::mutex> lock(frameMutex_);
             format_ = chosen ? chosen->format.Label() : std::string("Camera default format");
             formatKey_ = chosen ? chosen->key : std::string();
+            ++formatGen_;
         }
 
         // Frame geometry of the RGB32 output. Re-read whenever the reader reports a

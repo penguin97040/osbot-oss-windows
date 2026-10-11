@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "../camera/CameraWorker.h"
 #include "../preview/Preview.h"
@@ -34,6 +35,7 @@ public:
 private:
     void ManagePreview(const CameraState& s);
     void DrawHeader(const CameraState& s);
+    void RefreshFormats();
     void DrawPreviewToolbar(const CameraState& s);
     void DrawPreview(const CameraState& s, float width, float height);
     void DrawControlTab(const CameraState& s);
@@ -58,6 +60,16 @@ private:
     std::wstring previewAttemptPath_;  // stops a failed preview restarting every frame
     std::string previewFormatKey_;     // chosen preview format; empty = default. Not saved,
     std::wstring previewFormatDevice_; // so the app always opens at the default format.
+    // The preview's formats, refreshed only when Preview::FormatGeneration() or
+    // previewFormatKey_ changes. def/cur point into formats (null if not found).
+    struct FormatCache {
+        uint64_t generation = UINT64_MAX;
+        std::string requested;
+        std::vector<PreviewFormat> formats;
+        std::string defaultKey;
+        const PreviewFormat* def = nullptr;
+        const PreviewFormat* cur = nullptr;
+    } formats_;
     bool previewActive_ = false;
     bool holding_ = false;
     std::chrono::steady_clock::time_point lastStep_{};

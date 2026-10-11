@@ -669,17 +669,31 @@ void App::DrawHeader(const CameraState& s) {
     ImGui::Spacing();
 }
 
+void App::RefreshFormats() {
+    namespace pf = preview_format;
+    FormatCache& c = formats_;
+    const uint64_t generation = preview_.FormatGeneration();
+    if (generation == c.generation && previewFormatKey_ == c.requested) return;
+    c.generation = generation;
+    c.requested = previewFormatKey_;
+    c.formats = preview_.Formats();
+    c.defaultKey = preview_.DefaultFormatKey();
+    c.def = pf::Find(c.formats, c.defaultKey);
+    // What's showing now: the running format, else the one asked for, else the default.
+    c.cur = pf::Find(c.formats, preview_.CurrentFormatKey());
+    if (!c.cur) c.cur = pf::Find(c.formats, previewFormatKey_.empty() ? c.defaultKey : previewFormatKey_);
+    if (!c.cur) c.cur = c.def;
+}
+
 // The strip above the video: resolution, pixel format and frame rate pickers on
 // the left, the preview switch on the right.
 void App::DrawPreviewToolbar(const CameraState& s) {
     namespace pf = preview_format;
-    const std::vector<PreviewFormat> formats = preview_.Formats();
-    const std::string defaultKey = preview_.DefaultFormatKey();
-    const PreviewFormat* def = pf::Find(formats, defaultKey);
-    // What's showing now: the running format, else the one asked for, else the default.
-    const PreviewFormat* cur = pf::Find(formats, preview_.CurrentFormatKey());
-    if (!cur) cur = pf::Find(formats, previewFormatKey_.empty() ? defaultKey : previewFormatKey_);
-    if (!cur) cur = def;
+    RefreshFormats();
+    const std::vector<PreviewFormat>& formats = formats_.formats;
+    const std::string& defaultKey = formats_.defaultKey;
+    const PreviewFormat* def = formats_.def;
+    const PreviewFormat* cur = formats_.cur;
 
     if (s.connected && settings_.previewEnabled && cur) {
         auto choose = [&](uint32_t w, uint32_t h, const std::string& fourcc, int fps) {
