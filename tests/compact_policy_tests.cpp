@@ -60,6 +60,9 @@ int main() {
     CHECK(compact::AppName(L"Microsoft.WindowsCamera_8wekyb3d8bbwe", true) == L"WindowsCamera");
     CHECK(compact::AppName(L"MSTeams_8wekyb3d8bbwe", true) == L"MSTeams");
     CHECK(compact::AppName(L"C:#", false) == L"C:#");
+    CHECK(compact::ExeFileName(L"C:#Program Files#Zoom#bin#Zoom.exe") == L"Zoom.exe");
+    CHECK(compact::ExeFileName(L"Zoom.exe") == L"Zoom.exe");
+    CHECK(compact::ExeFileName(L"C:#").empty());
 
     if (failures) std::printf("%d check(s) failed\n", failures);
     else std::printf("All compact policy tests passed.\n");

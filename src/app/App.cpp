@@ -608,7 +608,7 @@ void App::SetCompact(bool on) {
 void App::ApplyWindowSize() {
     if (!resizePending_ || !hwnd_ || IsIconic(hwnd_)) return;
     resizePending_ = false;
-    if (compact_ && IsZoomed(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
+    if (compact_ && IsZoomed(hwnd_)) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);  // restore without taking the focus
     if (!compact_ && IsZoomed(hwnd_)) return;
     RECT r{};
     if (!GetWindowRect(hwnd_, &r)) return;
@@ -633,7 +633,8 @@ void App::ApplyWindowSize() {
 void App::ManagePreview(const CameraState& s) {
     // In the background the preview lets go of the camera, so another app (Discord,
     // Zoom) can turn it on; CheckCameraUse then notices and goes compact.
-    paused_ = settings_.pauseInBackground && hwnd_ && GetForegroundWindow() != hwnd_;
+    // A minimised window can stay the foreground one, so check for that too.
+    paused_ = settings_.pauseInBackground && hwnd_ && (GetForegroundWindow() != hwnd_ || IsIconic(hwnd_));
     const bool want = settings_.previewEnabled && s.connected && !compact_ && !paused_;
     if (!want) {
         if (preview_.Running()) {
@@ -656,12 +657,22 @@ void App::ManagePreview(const CameraState& s) {
     preview_.Start(s.device.path, previewFormatKey_);
 }
 
-void App::Frame() {
-    const CameraState s = worker_.Snapshot();
+// The work that doesn't draw anything: camera-use checks, window size and the preview.
+void App::Update(const CameraState& s) {
     if (s.connected && s.device.path != settings_.devicePath) settings_.devicePath = s.device.path;
     if (std::chrono::steady_clock::now() - lastUseCheck_ >= kUseCheckInterval) CheckCameraUse();
     ApplyWindowSize();
     ManagePreview(s);
+}
+
+void App::UpdateHidden() {
+    Update(worker_.Snapshot());
+    previewActive_ = false;  // nothing is drawn while hidden, so no need to redraw every frame
+}
+
+void App::Frame() {
+    const CameraState s = worker_.Snapshot();
+    Update(s);
     holding_ = false;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();

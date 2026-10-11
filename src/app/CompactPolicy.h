@@ -49,6 +49,12 @@ inline bool IsSamePath(const std::wstring& key, const std::wstring& exePath) {
     return true;
 }
 
+// A desktop app's exe file name from its key: "C:#Program Files#Zoom#bin#Zoom.exe" -> "Zoom.exe".
+inline std::wstring ExeFileName(const std::wstring& key) {
+    const size_t hash = key.rfind(L'#');
+    return hash == std::wstring::npos ? key : key.substr(hash + 1);
+}
+
 // A readable name from the key: "C:#Program Files#Zoom#bin#Zoom.exe" -> "Zoom",
 // "Microsoft.WindowsCamera_8wekyb3d8bbwe" (a Store app) -> "WindowsCamera".
 inline std::wstring AppName(const std::wstring& key, bool packaged) {
@@ -58,8 +64,7 @@ inline std::wstring AppName(const std::wstring& key, bool packaged) {
         const size_t dot = name.rfind(L'.');
         if (dot != std::wstring::npos && dot + 1 < name.size()) name.erase(0, dot + 1);
     } else {
-        const size_t hash = name.rfind(L'#');
-        if (hash != std::wstring::npos) name.erase(0, hash + 1);
+        name = ExeFileName(name);
         if (name.size() > 4) {
             std::wstring ext = name.substr(name.size() - 4);
             for (auto& ch : ext) ch = static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));

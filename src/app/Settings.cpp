@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include "Utf8.h"
 #include "../Safety.h"
 
 #include <windows.h>
@@ -16,22 +17,6 @@ namespace {
 std::wstring FilePath() {
     const auto dir = Settings::Directory();
     return dir.empty() ? std::wstring{} : dir + L"\\settings.ini";
-}
-
-std::string ToUtf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-    std::string s(static_cast<size_t>(len), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), s.data(), len, nullptr, nullptr);
-    return s;
-}
-
-std::wstring FromUtf8(const std::string& s) {
-    if (s.empty()) return {};
-    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring w(static_cast<size_t>(len), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), w.data(), len);
-    return w;
 }
 
 }  // namespace

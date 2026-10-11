@@ -25,6 +25,9 @@ public:
 
     // True while something on screen is animating (preview, held buttons).
     bool NeedsContinuousRedraw() const { return previewActive_ || holding_; }
+    // Called instead of Frame() while the window is minimised or hidden, so the
+    // preview still pauses and the camera-use check still runs.
+    void UpdateHidden();
 
     Settings& GetSettings() { return settings_; }
 
@@ -45,6 +48,7 @@ public:
     static void SetHeadingFont(ImFont* font);
 
 private:
+    void Update(const CameraState& s);
     void CheckCameraUse();
     void SetCompact(bool on);
     void ApplyWindowSize();

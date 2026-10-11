@@ -211,7 +211,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     runtime.mutex = mutex;
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND existing = FindWindowW(kWindowClass, nullptr)) {
-            ShowWindow(existing, SW_RESTORE);
+            if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);  // SW_RESTORE would un-maximise it
             SetForegroundWindow(existing);
         }
         return 0;
@@ -337,7 +337,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
                 graphicsFailed = true;
                 break;
             }
-            if (hr == DXGI_STATUS_OCCLUDED) { Sleep(50); continue; }
+            if (hr == DXGI_STATUS_OCCLUDED) {
+                app.UpdateHidden();  // minimised or locked: still pause the preview
+                Sleep(50);
+                continue;
+            }
         }
         g_occluded = false;
 

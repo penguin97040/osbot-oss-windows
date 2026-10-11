@@ -10,5 +10,6 @@ struct CameraUse {
     std::string appName;  // UTF-8, e.g. "Zoom"; empty when not in use
 };
 
-// Skips this app's own use (the preview). Takes well under a millisecond.
+// Skips this app's own use (the preview), and records left by desktop apps that
+// are no longer running. Takes a millisecond or so.
 CameraUse QueryCameraUse();
