@@ -22,7 +22,9 @@ add_test(NAME safety_tests COMMAND safety_tests)
 set_tests_properties(safety_tests PROPERTIES TIMEOUT 15)
 add_executable(preview_format_tests tests/preview_format_tests.cpp)
 add_test(NAME preview_format_tests COMMAND preview_format_tests)
-foreach(test_target protocol_tests safety_tests preview_format_tests)
+add_executable(compact_policy_tests tests/compact_policy_tests.cpp)
+add_test(NAME compact_policy_tests COMMAND compact_policy_tests)
+foreach(test_target protocol_tests safety_tests preview_format_tests compact_policy_tests)
   if(MSVC)
     target_compile_options(${test_target} PRIVATE /W4 /WX /utf-8)
     set_property(TARGET ${test_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -72,6 +74,7 @@ configure_file(src/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
 add_executable(osbot-oss-windows WIN32
   src/main.cpp
   src/app/App.cpp
+  src/app/CameraUse.cpp
   src/app/Log.cpp
   src/app/Settings.cpp
   src/camera/CameraDevice.cpp
@@ -108,7 +111,7 @@ target_link_libraries(osbot-oss-windows PRIVATE
   d3d11 d3dcompiler dxgi dwmapi
   ole32 oleaut32 uuid strmiids
   mfplat mfreadwrite mf mfuuid
-  shell32 imm32
+  shell32 imm32 advapi32
   freetype
 )
 

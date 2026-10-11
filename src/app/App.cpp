@@ -558,10 +558,79 @@ void App::Shutdown() {
     settings_.Save();
 }
 
+// ---- Compact view ----------------------------------------------------------------------
+
+namespace {
+constexpr int kPanelWidth = 460;                         // the controls panel, 96-DPI units
+constexpr int kCompactClientWidth = kPanelWidth + 2 * 12;  // plus WindowPadding.x each side
+constexpr auto kUseCheckInterval = std::chrono::seconds(2);
+}  // namespace
+
+int App::CompactWindowWidth(UINT dpi) {
+    RECT r{0, 0, MulDiv(kCompactClientWidth, static_cast<int>(dpi), 96), 100};
+    AdjustWindowRectExForDpi(&r, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+    return r.right - r.left;
+}
+
+void App::DecideStartupView(HWND hwnd) {
+    hwnd_ = hwnd;
+    CheckCameraUse();
+    ApplyWindowSize();  // before the window is shown, so it opens at the right size
+}
+
+void App::CheckCameraUse() {
+    lastUseCheck_ = std::chrono::steady_clock::now();
+    if (!settings_.autoCompact) return;
+    cameraUse_ = QueryCameraUse();
+    switch (compactPolicy_.OnDetected(cameraUse_.inUse, compact_)) {
+    case compact::Switch::ToCompact:
+        LOG_INFO("%s is using the camera: switching to compact view.", cameraUse_.appName.c_str());
+        SetCompact(true);
+        break;
+    case compact::Switch::ToFull:
+        LOG_INFO("The other app has finished with the camera: switching to full view.");
+        SetCompact(false);
+        break;
+    case compact::Switch::None:
+        break;
+    }
+}
+
+void App::SetCompact(bool on) {
+    if (on == compact_) return;
+    compact_ = on;
+    resizePending_ = true;
+}
+
+// Narrows the window to the controls, or gives back the width it had in full view.
+// Only the width changes; the left edge stays unless the window would leave the screen.
+void App::ApplyWindowSize() {
+    if (!resizePending_ || !hwnd_ || IsIconic(hwnd_)) return;
+    resizePending_ = false;
+    if (compact_ && IsZoomed(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
+    if (!compact_ && IsZoomed(hwnd_)) return;
+    RECT r{};
+    if (!GetWindowRect(hwnd_, &r)) return;
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    if (!dpi) return;
+    int width = 0;
+    if (compact_) {
+        fullWidth96_ = MulDiv(r.right - r.left, 96, static_cast<int>(dpi));
+        width = CompactWindowWidth(dpi);
+    } else {
+        width = MulDiv(fullWidth96_ > 0 ? fullWidth96_ : settings_.windowW, static_cast<int>(dpi), 96);
+    }
+    int x = r.left;
+    MONITORINFO mi{sizeof mi};
+    if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &mi) && x + width > mi.rcWork.right)
+        x = std::max(mi.rcWork.left, mi.rcWork.right - width);
+    SetWindowPos(hwnd_, nullptr, x, r.top, width, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 // ---- Frame -----------------------------------------------------------------------------
 
 void App::ManagePreview(const CameraState& s) {
-    const bool want = settings_.previewEnabled && s.connected;
+    const bool want = settings_.previewEnabled && s.connected && !compact_;
     if (!want) {
         if (preview_.Running()) preview_.Stop();
         previewAttemptPath_.clear();
@@ -582,6 +651,8 @@ void App::ManagePreview(const CameraState& s) {
 void App::Frame() {
     const CameraState s = worker_.Snapshot();
     if (s.connected && s.device.path != settings_.devicePath) settings_.devicePath = s.device.path;
+    if (std::chrono::steady_clock::now() - lastUseCheck_ >= kUseCheckInterval) CheckCameraUse();
+    ApplyWindowSize();
     ManagePreview(s);
     holding_ = false;
 
@@ -593,18 +664,24 @@ void App::Frame() {
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
     DrawHeader(s);
+    if (compact_ && cameraUse_.inUse) {
+        ImGui::TextDisabled("Camera in use by %s, so the preview is hidden.", cameraUse_.appName.c_str());
+    }
 
-    const float panelW = std::min(460.0f * ImGui::GetStyle().FontScaleDpi, ImGui::GetContentRegionAvail().x * 0.55f);
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float previewW = avail.x - panelW - ImGui::GetStyle().ItemSpacing.x;
-
-    ImGui::BeginChild("##preview", ImVec2(previewW, avail.y), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    DrawPreviewToolbar(s);
-    DrawPreview(s, ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
-    ImGui::EndChild();
-
-    ImGui::SameLine();
+    float panelW = avail.x;
+    if (compact_) {
+        previewActive_ = false;
+    } else {
+        panelW = std::min(kPanelWidth * ImGui::GetStyle().FontScaleDpi, avail.x * 0.55f);
+        const float previewW = avail.x - panelW - ImGui::GetStyle().ItemSpacing.x;
+        ImGui::BeginChild("##preview", ImVec2(previewW, avail.y), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        DrawPreviewToolbar(s);
+        DrawPreview(s, ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+        ImGui::EndChild();
+        ImGui::SameLine();
+    }
     ImGui::BeginChild("##panel", ImVec2(panelW, avail.y), ImGuiChildFlags_Borders);
     if (ImGui::BeginTabBar("##tabs")) {
         if (ImGui::BeginTabItem("Control")) { DrawControlTab(s); ImGui::EndTabItem(); }
@@ -623,6 +700,7 @@ void App::Frame() {
 }
 
 void App::DrawHeader(const CameraState& s) {
+    const ImGuiStyle& style = ImGui::GetStyle();
     ImGui::AlignTextToFramePadding();
     if (g_headingFont) ImGui::PushFont(g_headingFont, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
@@ -633,37 +711,56 @@ void App::DrawHeader(const CameraState& s) {
     const bool asleep = s.status.valid && s.status.asleep;
     const ImVec4 colour = !s.connected ? kBad : asleep ? kWarn : kGood;
     StatusPill(!s.connected ? "Not connected" : asleep ? "Asleep" : "Connected", colour);
-    if (s.connected) {
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", obsbot::ModelName(s.device.model));
+
+    // Right-hand group: [camera picker] [Compact] [Sleep camera].
+    const bool picker = s.connected && s.available.size() > 1;
+    const float compactW = ImGui::CalcTextSize("Compact").x + style.FramePadding.x * 2;
+    const float sleepW = std::max(ImGui::CalcTextSize("Sleep camera").x, ImGui::CalcTextSize("Wake camera").x) +
+                         style.FramePadding.x * 2;
+    const float buttonsW = compactW + (s.connected ? Gap() + sleepW : 0.0f);
+    const float lineW = ImGui::GetContentRegionAvail().x;  // the cursor is at the start of the next line
+    const float room = ImGui::GetCursorScreenPos().x + lineW - ImGui::GetItemRectMax().x - Gap();  // after the pill
+    const float minComboW = 140.0f * style.FontScaleDpi, maxComboW = 260.0f * style.FontScaleDpi;
+    // In a narrow window (e.g. compact view) with several cameras, the group gets its own line.
+    const bool wrap = picker && room < buttonsW + Gap() + minComboW;
+    const float comboW = picker ? std::clamp((wrap ? lineW : room) - buttonsW - Gap(), minComboW, maxComboW) : 0.0f;
+    const float groupW = buttonsW + (picker ? comboW + Gap() : 0.0f);
+
+    if (s.connected) {  // the model name only if there's room for it
+        const char* model = obsbot::ModelName(s.device.model);
+        if ((wrap ? room : room - groupW - Gap()) >= ImGui::CalcTextSize(model).x) {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", model);
+        }
     }
 
-    if (s.connected) {
-        const char* label = s.status.valid && s.status.asleep ? "Wake camera" : "Sleep camera";
-        const float comboW = 260.0f * ImGui::GetStyle().FontScaleDpi;
-        const float buttonW = std::max(ImGui::CalcTextSize("Sleep camera").x, ImGui::CalcTextSize("Wake camera").x) +
-                              ImGui::GetStyle().FramePadding.x * 2;
-        float w = buttonW;
-        if (s.available.size() > 1) w += comboW + Gap();
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
-        if (s.available.size() > 1) {
-            if (BeginDropdown("##device", s.device.name.c_str(), comboW)) {
-                for (const auto& d : s.available) {
-                    bool sel = d.path == s.device.path;
-                    std::string label2 = d.name + "##" + NarrowPath(d.path);
-                    if (ImGui::Selectable(label2.c_str(), sel)) {
-                        settings_.devicePath = d.path;
-                        worker_.SelectDevice(d.path);
-                    }
+    if (!wrap) ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - groupW));
+    if (picker) {
+        if (BeginDropdown("##device", s.device.name.c_str(), comboW)) {
+            for (const auto& d : s.available) {
+                bool sel = d.path == s.device.path;
+                std::string label2 = d.name + "##" + NarrowPath(d.path);
+                if (ImGui::Selectable(label2.c_str(), sel)) {
+                    settings_.devicePath = d.path;
+                    worker_.SelectDevice(d.path);
                 }
-                ImGui::EndCombo();
             }
-            ImGui::SameLine();
+            ImGui::EndCombo();
         }
+        ImGui::SameLine();
+    }
+    if (ToggleButton("Compact", compact_, ImVec2(compactW, 0))) {
+        compactPolicy_.OnManualToggle();
+        SetCompact(!compact_);
+    }
+    Tooltip("Hide the preview and narrow the window to the controls. Turns on by itself while another app "
+            "(Zoom, Discord, Teams...) is using the camera, and off again when it stops.");
+    if (s.connected) {
+        ImGui::SameLine();
         ImGui::BeginDisabled(!s.xu);
-        if (ImGui::Button(label, ImVec2(buttonW, 0))) worker_.SetSleep(!(s.status.valid && s.status.asleep));
+        if (ImGui::Button(asleep ? "Wake camera" : "Sleep camera", ImVec2(sleepW, 0))) worker_.SetSleep(!asleep);
         ImGui::EndDisabled();
     }
     ImGui::Spacing();
@@ -1133,6 +1230,14 @@ void App::DrawCameraTab(const CameraState& s) {
     }
 
     SectionTitle("ADVANCED");
+    RowLabel("Auto compact view", "Switches to compact view (no preview, narrower window) while another app such "
+                                  "as Zoom, Discord or Teams is using a camera, and back again when it stops.");
+    if (ToggleSwitch("##autocompact", &settings_.autoCompact)) {
+        compactPolicy_ = {};
+        cameraUse_ = {};
+        lastUseCheck_ = {};  // check straight away if it was turned on
+        settings_.Save();
+    }
     RowLabel("Developer tab", "Adds a Developer tab for testing raw camera commands. You won't need it for everyday use.");
     if (ToggleSwitch("##developer", &settings_.showDeveloper)) settings_.Save();
 

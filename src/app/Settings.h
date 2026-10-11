@@ -21,6 +21,7 @@ struct Settings {
     bool invertHorizontal = false;  // on top of each movement method's own direction
     bool invertVertical = false;
     bool showDeveloper = false;
+    bool autoCompact = true;  // compact view while another app is using the camera
     std::array<Preset, 3> presets{};
     std::wstring devicePath;  // last camera used
     int windowW = 1280, windowH = 800;

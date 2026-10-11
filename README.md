@@ -26,7 +26,7 @@ Inspired by [obsbot4linux](https://github.com/vampyren/obsbot4linux), which does
 | Zoom | Zoom slider |
 | Picture | Brightness, contrast, saturation, sharpness, hue, gamma, white balance, exposure, gain, backlight, focus (with Auto where supported) |
 | Camera | HDR, field of view (wide/medium/narrow), anti-flicker (50 Hz default for NZ), sleep/wake |
-| Other | Live preview with resolution, pixel format and frame rate pickers (can be turned off), activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
+| Other | Live preview with resolution, pixel format and frame rate pickers (can be turned off), compact view, activity log, *Copy diagnostics*, optional Developer tab for protocol testing |
 
 ## Download and run
 
@@ -39,8 +39,11 @@ Requirements: Windows 10 or 11, 64-bit. Windows "N" editions need the free
 *Media Feature Pack* installed.
 
 Tips:
-- Only one app can use the camera's **video** at a time. To use Teams, Zoom or OBS
-  while this app is open, turn off the *Live preview* switch above the preview. The controls keep working.
+- Only one app can use the camera's **video** at a time. If Teams, Zoom, Discord or another app is
+  already using the camera, the app opens in **compact view**: the same controls without the preview,
+  in a narrower window. It switches back when the other app lets go of the camera, and the *Compact*
+  button at the top switches by hand. To start a call while the app shows the preview, click *Compact*
+  or turn off the *Live preview* switch. The controls keep working either way.
 - Settings and the log live in `%APPDATA%\osbot-oss-windows\`. Delete that folder to reset.
 
 ## Status

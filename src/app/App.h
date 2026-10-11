@@ -11,6 +11,8 @@
 
 #include "../camera/CameraWorker.h"
 #include "../preview/Preview.h"
+#include "CameraUse.h"
+#include "CompactPolicy.h"
 #include "Settings.h"
 
 struct ImFont;
@@ -26,6 +28,16 @@ public:
 
     Settings& GetSettings() { return settings_; }
 
+    // Compact view hides the preview and narrows the window to the controls.
+    // Call once after creating the (still hidden) window: starts compact if another
+    // app is using the camera.
+    void DecideStartupView(HWND hwnd);
+    bool Compact() const { return compact_; }
+    // Width (96-DPI units) to restore in full view; 0 if not known yet.
+    int FullWindowWidth() const { return fullWidth96_; }
+    // Outer window width in pixels for the compact view at this DPI.
+    static int CompactWindowWidth(UINT dpi);
+
     static void ApplyTheme(float dpiScale);
     // The window background (0xRRGGBB), shared with the title bar and swap-chain clear in main.cpp.
     static constexpr unsigned kBackgroundRgb = 0x06090D;
@@ -33,6 +45,9 @@ public:
     static void SetHeadingFont(ImFont* font);
 
 private:
+    void CheckCameraUse();
+    void SetCompact(bool on);
+    void ApplyWindowSize();
     void ManagePreview(const CameraState& s);
     void DrawHeader(const CameraState& s);
     void RefreshFormats();
@@ -70,6 +85,12 @@ private:
         const PreviewFormat* def = nullptr;
         const PreviewFormat* cur = nullptr;
     } formats_;
+    bool compact_ = false;
+    bool resizePending_ = false;  // applied by the next frame, once the window isn't minimised
+    int fullWidth96_ = 0;
+    compact::Policy compactPolicy_;
+    CameraUse cameraUse_;
+    std::chrono::steady_clock::time_point lastUseCheck_{};
     bool previewActive_ = false;
     bool holding_ = false;
     std::chrono::steady_clock::time_point lastStep_{};

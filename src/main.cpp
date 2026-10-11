@@ -31,6 +31,7 @@ ID3D11RenderTargetView* g_rtv = nullptr;
 bool g_occluded = false;
 UINT g_resizeW = 0, g_resizeH = 0;
 float g_pendingDpiScale = 0.0f;
+const App* g_app = nullptr;  // for the window's minimum size, which depends on the view
 
 bool CreateRenderTarget() {
     ID3D11Texture2D* backBuffer = nullptr;
@@ -174,7 +175,8 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_GETMINMAXINFO: {
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
         const float scale = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
-        mmi->ptMinTrackSize.x = static_cast<LONG>(820 * scale);
+        mmi->ptMinTrackSize.x = g_app && g_app->Compact() ? App::CompactWindowWidth(GetDpiForWindow(hwnd))
+                                                         : static_cast<LONG>(820 * scale);
         mmi->ptMinTrackSize.y = static_cast<LONG>(600 * scale);
         return 0;
     }
@@ -239,6 +241,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     App app;
     app.GetSettings().Load();
     Settings& settings = app.GetSettings();
+    g_app = &app;
+    struct ClearAppPointer { ~ClearAppPointer() { g_app = nullptr; } } clearAppPointer;  // runs before ~App
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof wc;
@@ -268,6 +272,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
         return 1;
     }
     UseDarkTitleBar(hwnd);
+    app.DecideStartupView(hwnd);  // compact if another app is using the camera
 
     if (!CreateDeviceD3D(hwnd)) {
         CleanupDeviceD3D();
@@ -373,6 +378,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     if (GetWindowPlacement(hwnd, &wp)) {
         const float s = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
         settings.windowW = static_cast<int>((wp.rcNormalPosition.right - wp.rcNormalPosition.left) / s);
+        // Keep the full view's width, not the compact one.
+        if (app.Compact() && app.FullWindowWidth() > 0) settings.windowW = app.FullWindowWidth();
         settings.windowH = static_cast<int>((wp.rcNormalPosition.bottom - wp.rcNormalPosition.top) / s);
     }
     app.Shutdown();
