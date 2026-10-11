@@ -86,6 +86,7 @@ private:
         const PreviewFormat* cur = nullptr;
     } formats_;
     bool compact_ = false;
+    bool paused_ = false;  // preview paused because another window is active
     bool resizePending_ = false;  // applied by the next frame, once the window isn't minimised
     int fullWidth96_ = 0;
     compact::Policy compactPolicy_;

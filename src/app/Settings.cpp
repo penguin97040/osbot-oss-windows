@@ -91,6 +91,7 @@ void Settings::Load() {
     invertVertical = getBool("invert_vertical", invertVertical);
     showDeveloper = getBool("show_developer", showDeveloper);
     autoCompact = getBool("auto_compact", autoCompact);
+    pauseInBackground = getBool("pause_in_background", pauseInBackground);
     // A hand-edited or damaged file must not produce out-of-range values (the
     // move speed goes straight to the gimbal). Fall back to the defaults.
     const Settings defaults;
@@ -127,6 +128,7 @@ void Settings::Save() const {
     fprintf(f, "invert_vertical=%d\r\n", invertVertical ? 1 : 0);
     fprintf(f, "show_developer=%d\r\n", showDeveloper ? 1 : 0);
     fprintf(f, "auto_compact=%d\r\n", autoCompact ? 1 : 0);
+    fprintf(f, "pause_in_background=%d\r\n", pauseInBackground ? 1 : 0);
     fprintf(f, "window_w=%d\r\n", windowW);
     fprintf(f, "window_h=%d\r\n", windowH);
     fprintf(f, "device_path=%s\r\n", ToUtf8(devicePath).c_str());

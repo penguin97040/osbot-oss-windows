@@ -37,21 +37,26 @@ Some checks use the **Developer** tab. Turn it on with *Camera → Advanced → 
 - [ ] With two cameras connected, switch cameras during preview; only the selected camera appears.
 - [ ] Resize, minimise and restore the window while previewing; the image redraws normally.
 
-### Compact view
+### Compact view and pausing the preview
 - [ ] With Discord, Zoom or Teams already using the camera, open the app: it opens narrow, without the
-      preview, with *Compact* lit up and "Camera in use by ..." under the header naming that app.
+      preview, with the header switch on *Compact* and "Camera in use by ..." under the header naming that app.
       Opening is just as quick as before.
-- [ ] With the app open in full view, start a call in another app: within a few seconds the app goes
-      compact and the call gets the camera. End the call: it returns to full view at its normal width.
-- [ ] Click *Compact* by hand: the preview stops and the window narrows. Click it again: it widens to its
-      earlier size and the preview restarts.
-- [ ] During a call, click *Compact* to go back to full view: it stays in full view when the call ends.
+- [ ] With the app open in full view showing the preview, click into Discord: the app's preview pauses
+      (a dimmed, blurred picture with "Preview paused"). Turn on your video in Discord: it works, and within a
+      few seconds the app goes compact. End the call: the app returns to full view at its normal width, and
+      the preview starts again when you click back into the app.
+- [ ] Click back into the app with no call running: the blurred picture shows "Starting preview..." and the
+      live picture replaces it within a second or two.
+- [ ] Turn off *Camera → Pause preview*: the preview keeps running while another window is active.
+- [ ] Switch the header to *Compact* by hand: the preview stops and the window narrows. Switch back to *Full*:
+      it widens to its earlier size and the preview restarts.
+- [ ] During a call, switch back to *Full*: it stays in full view when the call ends.
 - [ ] Maximise the window, then start a call: it un-maximises and goes compact.
 - [ ] Move the window near the right edge of the screen in compact view, then go back to full view: the
       window stays on screen.
 - [ ] With the camera connected, the header in compact view fits on one line (the model name may be
       hidden). With two cameras, the camera picker and buttons move to their own line.
-- [ ] Turn off *Camera → Auto compact view*: starting and ending a call no longer changes the view.
+- [ ] Turn off *Camera → Auto compact*: starting and ending a call no longer changes the view.
 - [ ] Close the app while compact, then open it with no call running: it opens at the normal full width.
 
 ### AI tracking (Control tab)

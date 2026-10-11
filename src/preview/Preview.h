@@ -44,6 +44,13 @@ public:
     // so the UI can keep its own copy instead of fetching them every frame.
     uint64_t FormatGeneration();
 
+    // A blurred copy of the last frame, shown while the preview is paused. MakeStill
+    // keeps the previous one if no frame has arrived since. width/height give the
+    // frame's shape, not the texture's (tiny) size. Null when there's none.
+    void MakeStill(ID3D11Device* device);
+    void ClearStill();
+    ID3D11ShaderResourceView* Still(int* width, int* height) const;
+
 private:
     void Run(std::wstring path, std::string formatKey, std::shared_ptr<PreviewReadState> state);
     void SetError(const std::string& e);
@@ -70,4 +77,6 @@ private:
     int texW_ = 0, texH_ = 0;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> stillSrv_;  // UI thread only
+    int stillW_ = 0, stillH_ = 0;
 };

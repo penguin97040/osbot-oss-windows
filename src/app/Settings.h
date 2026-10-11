@@ -22,6 +22,7 @@ struct Settings {
     bool invertVertical = false;
     bool showDeveloper = false;
     bool autoCompact = true;  // compact view while another app is using the camera
+    bool pauseInBackground = true;  // stop the preview while another window is active
     std::array<Preset, 3> presets{};
     std::wstring devicePath;  // last camera used
     int windowW = 1280, windowH = 800;

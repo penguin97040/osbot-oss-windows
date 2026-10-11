@@ -1,5 +1,6 @@
 #include "Preview.h"
 #include "AsyncMailbox.h"
+#include "StillImage.h"
 
 #include <mfapi.h>
 #include <mferror.h>
@@ -129,6 +130,7 @@ void Preview::Start(const std::wstring& devicePath, const std::string& formatKey
         if (devicePath != path_) {
             formats_.clear();
             defaultFormatKey_.clear();
+            ClearStill();
         }
         error_.clear();
         format_.clear();
@@ -446,6 +448,49 @@ void Preview::Run(std::wstring path, std::string formatKey, std::shared_ptr<Prev
     LOG_INFO("Preview stopped.");
     running_ = false;
     if (SUCCEEDED(hrCom)) CoUninitialize();
+}
+
+void Preview::MakeStill(ID3D11Device* device) {
+    std::vector<uint8_t> pixels;
+    int w = 0, h = 0, frameW = 0, frameH = 0;
+    {
+        std::lock_guard<std::mutex> lock(frameMutex_);
+        if (frameId_ == 0 || frame_.size() < static_cast<size_t>(frameW_) * frameH_ * 4) return;
+        if (!still_image::BlurredThumbnail(frame_.data(), frameW_, frameH_, 48, &pixels, &w, &h)) return;
+        frameW = frameW_;
+        frameH = frameH_;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = static_cast<UINT>(w);
+    desc.Height = static_cast<UINT>(h);
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA data{};
+    data.pSysMem = pixels.data();
+    data.SysMemPitch = static_cast<UINT>(w) * 4;
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> srv;
+    if (FAILED(device->CreateTexture2D(&desc, &data, texture.GetAddressOf())) ||
+        FAILED(device->CreateShaderResourceView(texture.Get(), nullptr, srv.GetAddressOf())))
+        return;
+    stillSrv_ = srv;
+    stillW_ = frameW;
+    stillH_ = frameH;
+}
+
+void Preview::ClearStill() {
+    stillSrv_.Reset();
+    stillW_ = stillH_ = 0;
+}
+
+ID3D11ShaderResourceView* Preview::Still(int* width, int* height) const {
+    *width = stillW_;
+    *height = stillH_;
+    return stillSrv_.Get();
 }
 
 ID3D11ShaderResourceView* Preview::Update(ID3D11Device* device, ID3D11DeviceContext* ctx, int* width, int* height) {

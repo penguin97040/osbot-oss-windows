@@ -241,11 +241,12 @@ bool ToggleSwitch(const char* label, bool* v) {
 }
 
 // Joined, equal-width choices with the selected one in the accent colour.
-// Returns the index that was clicked, or -1.
+// Returns the index that was clicked, or -1. Fills the rest of the line unless
+// fixedWidth is given.
 int Segmented(const char* id, const char* const* labels, int count, int selected,
-              const char* const* tooltips = nullptr) {
+              const char* const* tooltips = nullptr, float fixedWidth = 0.0f) {
     ImGui::PushID(id);
-    const float width = ImGui::GetContentRegionAvail().x;
+    const float width = fixedWidth > 0.0f ? fixedWidth : ImGui::GetContentRegionAvail().x;
     const float h = ImGui::GetFrameHeight();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -562,7 +563,7 @@ void App::Shutdown() {
 
 namespace {
 constexpr int kPanelWidth = 460;                         // the controls panel, 96-DPI units
-constexpr int kCompactClientWidth = kPanelWidth + 2 * 12;  // plus WindowPadding.x each side
+constexpr int kCompactClientWidth = 520;  // the panel and padding, with room for the header
 constexpr auto kUseCheckInterval = std::chrono::seconds(2);
 }  // namespace
 
@@ -630,9 +631,16 @@ void App::ApplyWindowSize() {
 // ---- Frame -----------------------------------------------------------------------------
 
 void App::ManagePreview(const CameraState& s) {
-    const bool want = settings_.previewEnabled && s.connected && !compact_;
+    // In the background the preview lets go of the camera, so another app (Discord,
+    // Zoom) can turn it on; CheckCameraUse then notices and goes compact.
+    paused_ = settings_.pauseInBackground && hwnd_ && GetForegroundWindow() != hwnd_;
+    const bool want = settings_.previewEnabled && s.connected && !compact_ && !paused_;
     if (!want) {
-        if (preview_.Running()) preview_.Stop();
+        if (preview_.Running()) {
+            preview_.Stop();
+            if (paused_) preview_.MakeStill(device_);
+        }
+        if (!settings_.previewEnabled) preview_.ClearStill();
         previewAttemptPath_.clear();
         return;
     }
@@ -712,17 +720,17 @@ void App::DrawHeader(const CameraState& s) {
     const ImVec4 colour = !s.connected ? kBad : asleep ? kWarn : kGood;
     StatusPill(!s.connected ? "Not connected" : asleep ? "Asleep" : "Connected", colour);
 
-    // Right-hand group: [camera picker] [Compact] [Sleep camera].
+    // Right-hand group: [camera picker] [Full | Compact] [Sleep camera].
     const bool picker = s.connected && s.available.size() > 1;
-    const float compactW = ImGui::CalcTextSize("Compact").x + style.FramePadding.x * 2;
+    const float viewW = 2.0f * (ImGui::CalcTextSize("Compact").x + style.FramePadding.x * 2);
     const float sleepW = std::max(ImGui::CalcTextSize("Sleep camera").x, ImGui::CalcTextSize("Wake camera").x) +
                          style.FramePadding.x * 2;
-    const float buttonsW = compactW + (s.connected ? Gap() + sleepW : 0.0f);
+    const float buttonsW = viewW + (s.connected ? Gap() + sleepW : 0.0f);
     const float lineW = ImGui::GetContentRegionAvail().x;  // the cursor is at the start of the next line
     const float room = ImGui::GetCursorScreenPos().x + lineW - ImGui::GetItemRectMax().x - Gap();  // after the pill
     const float minComboW = 140.0f * style.FontScaleDpi, maxComboW = 260.0f * style.FontScaleDpi;
-    // In a narrow window (e.g. compact view) with several cameras, the group gets its own line.
-    const bool wrap = picker && room < buttonsW + Gap() + minComboW;
+    // If it doesn't fit beside the pill (e.g. several cameras in compact view), the group gets its own line.
+    const bool wrap = room < buttonsW + (picker ? Gap() + minComboW : 0.0f);
     const float comboW = picker ? std::clamp((wrap ? lineW : room) - buttonsW - Gap(), minComboW, maxComboW) : 0.0f;
     const float groupW = buttonsW + (picker ? comboW + Gap() : 0.0f);
 
@@ -751,12 +759,15 @@ void App::DrawHeader(const CameraState& s) {
         }
         ImGui::SameLine();
     }
-    if (ToggleButton("Compact", compact_, ImVec2(compactW, 0))) {
+    const char* views[] = {"Full", "Compact"};
+    const char* viewTips[] = {"Show the preview beside the controls.",
+                              "Hide the preview and narrow the window to the controls. Turns on by itself while "
+                              "another app (Zoom, Discord, Teams...) is using the camera, and off again when it stops."};
+    const int view = Segmented("##view", views, 2, compact_ ? 1 : 0, viewTips, viewW);
+    if (view >= 0 && (view == 1) != compact_) {
         compactPolicy_.OnManualToggle();
-        SetCompact(!compact_);
+        SetCompact(view == 1);
     }
-    Tooltip("Hide the preview and narrow the window to the controls. Turns on by itself while another app "
-            "(Zoom, Discord, Teams...) is using the camera, and off again when it stops.");
     if (s.connected) {
         ImGui::SameLine();
         ImGui::BeginDisabled(!s.xu);
@@ -874,15 +885,27 @@ void App::DrawPreview(const CameraState& s, float width, float height) {
         ImGui::PopTextWrapPos();
     };
 
-    if (srv && texW > 0 && texH > 0) {
-        const float scale = std::min(width / texW, height / texH);
-        const ImVec2 size(texW * scale, texH * scale);
+    // Letterboxed in the area, keeping the frame's shape.
+    auto drawImage = [&](ID3D11ShaderResourceView* view, int w, int h, const ImVec4& tint) {
+        const float scale = std::min(width / w, height / h);
+        const ImVec2 size(w * scale, h * scale);
         ImGui::SetCursorPos(ImVec2(start.x + (width - size.x) * 0.5f, start.y + (height - size.y) * 0.5f));
-        ImGui::Image(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(srv))), size);
+        ImGui::ImageWithBg(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(view))), size,
+                           ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0), tint);
         CornerBrackets(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), kAccentDim);
+    };
+    if (srv && texW > 0 && texH > 0) {
+        drawImage(srv, texW, texH, ImVec4(1, 1, 1, 1));
         return;
     }
-    {
+    // While paused or restarting, a dimmed, blurred copy of the last frame.
+    int stillW = 0, stillH = 0;
+    ID3D11ShaderResourceView* still = s.connected && settings_.previewEnabled ? preview_.Still(&stillW, &stillH) : nullptr;
+    const bool restarting = preview_.Running() && preview_.Error().empty();
+    if (still && stillW > 0 && stillH > 0 && (paused_ || restarting)) {
+        drawImage(still, stillW, stillH, ImVec4(1, 1, 1, 0.45f));
+        ImGui::SetCursorPos(start);
+    } else {
         const ImVec2 a = ImGui::GetCursorScreenPos();
         CornerBrackets(ImGui::GetWindowDrawList(), a, ImVec2(a.x + width, a.y + height), Accent(0.15f));
     }
@@ -891,6 +914,18 @@ void App::DrawPreview(const CameraState& s, float width, float height) {
         centredText("Waiting for an OBSBOT camera...", kTextDim);
     } else if (!settings_.previewEnabled) {
         centredText("Preview is off.", kTextDim);
+    } else if (paused_) {
+        const char* title = "Preview paused";
+        const char* note = "It resumes when you come back to this window.";
+        const float gap = ImGui::GetStyle().ItemSpacing.y;
+        const ImVec2 ts = ImGui::CalcTextSize(title), ns = ImGui::CalcTextSize(note, nullptr, false, width * 0.8f);
+        const float top = start.y + (height - ts.y - gap - ns.y) * 0.5f;
+        ImGui::SetCursorPos(ImVec2(start.x + (width - ts.x) * 0.5f, top));
+        ImGui::TextUnformatted(title);
+        ImGui::SetCursorPos(ImVec2(start.x + (width - ns.x) * 0.5f, top + ts.y + gap));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width * 0.8f);
+        ImGui::TextDisabled("%s", note);
+        ImGui::PopTextWrapPos();
     } else if (std::string err = preview_.Error(); !err.empty()) {
         centredText(err.c_str(), kWarn);
         const char* retry = "Retry preview";
@@ -1230,14 +1265,17 @@ void App::DrawCameraTab(const CameraState& s) {
     }
 
     SectionTitle("ADVANCED");
-    RowLabel("Auto compact view", "Switches to compact view (no preview, narrower window) while another app such "
-                                  "as Zoom, Discord or Teams is using a camera, and back again when it stops.");
+    RowLabel("Auto compact", "Switches to compact view (no preview, narrower window) while another app such "
+                             "as Zoom, Discord or Teams is using a camera, and back again when it stops.");
     if (ToggleSwitch("##autocompact", &settings_.autoCompact)) {
         compactPolicy_ = {};
         cameraUse_ = {};
         lastUseCheck_ = {};  // check straight away if it was turned on
         settings_.Save();
     }
+    RowLabel("Pause preview", "Stops the preview while you're using another window, so apps like Discord or "
+                              "Zoom can turn on the camera. It starts again when you come back.");
+    if (ToggleSwitch("##pausebg", &settings_.pauseInBackground)) settings_.Save();
     RowLabel("Developer tab", "Adds a Developer tab for testing raw camera commands. You won't need it for everyday use.");
     if (ToggleSwitch("##developer", &settings_.showDeveloper)) settings_.Save();
 

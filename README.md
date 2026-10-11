@@ -41,9 +41,9 @@ Requirements: Windows 10 or 11, 64-bit. Windows "N" editions need the free
 Tips:
 - Only one app can use the camera's **video** at a time. If Teams, Zoom, Discord or another app is
   already using the camera, the app opens in **compact view**: the same controls without the preview,
-  in a narrower window. It switches back when the other app lets go of the camera, and the *Compact*
-  button at the top switches by hand. To start a call while the app shows the preview, click *Compact*
-  or turn off the *Live preview* switch. The controls keep working either way.
+  in a narrower window. It switches back when the other app lets go of the camera, and the *Full | Compact*
+  switch at the top changes it by hand. While you're using another window the preview pauses, so you can
+  turn on your camera in a call with this app still open. The controls keep working either way.
 - Settings and the log live in `%APPDATA%\osbot-oss-windows\`. Delete that folder to reset.
 
 ## Status
